@@ -82,6 +82,17 @@ class RedisLDAModelCache:
                     if v > 0:
                         self.topic_w[z][w] = v
                 self.topic_wsum[z] = int(pipe.get(('sum', z)).execute()[0])
+                sys.stderr.write('[TOPIC %d] :: %s\n' % (z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.topic_to_string(self.topic_w[z])])))
+    
+    @staticmethod
+    def topic_to_string(topic, max_length=20):
+        result = []
+        for w,c in topic.iteritems():
+            if len(result) > max_length:
+                heapq.heappushpop(result, (c,w))
+            else:
+                heapq.heappush(result, (c,w))
+        return heapq.nlargest(result, max_length)
 
     """
     # @timed
@@ -200,7 +211,7 @@ class DistributedLDA:
 
     @timed
     def do_iteration(self, iter):
-        for d in self.documents:
+        for d in self.model.documents:
             self.resample_document(d)
         sys.stderr.write('done iter=%d\n' % iter)
 
@@ -214,7 +225,7 @@ class DistributedLDA:
                 self.insert_new_document(d)
                 self.resample_document(d)
                 processed += 1
-                if processed % 1e5 == 0:
+                if processed % 1000 == 0:
                     sys.stderr.write('... loaded %d documents [%s]\n' % (processed, d.name))
         return self
 
@@ -253,6 +264,8 @@ if __name__ == '__main__':
     options.shards = options.cores * options.shards # split up even more
 
     def run_local_shard(core_id):
+        # The basic idea here is the multiply the number of shards by the number of cores and
+        # split them up even more
         options.this_shard = options.this_shard * options.cores + core_id
         sys.stderr.write('initialize core %d on shard %d\n' % (core_id, options.this_shard))
         DistributedLDA(options).load_initial_docs().iterate()
