@@ -1,90 +1,64 @@
 import sys
 import redis
 import random
-from math import log, exp
+from math import log
 from collections import defaultdict
 from itertools import izip
-from contextlib import contextmanager
 
 from lda import *
 
 
 # XXX TODO: batch up changes instead of making them on the fly
 
-@contextmanager
-def transact(r):
-    pipe = r.pipeline()
-    yield pipe
+class RedisLDAModelCache:
+    """
+    Holds the current assumed global state and the current local deltas 
+    to the LDA model.
 
-@contextmanager
-def execute(r, transaction=True):
-    pipe = r.pipeline(transaction=transaction)
-    yield pipe
-    pipe.execute()
-
-class RedisLDA:
-    def __init__(self, redis_instance, topics=50, alpha=0.1, beta=0.1, sync_rate=10000):
+    Currently this holds the entire local model state and can do the sync.
+    """
+    def __init__(self, redis_instance, topics, push_every=100, pull_every=10000):
         self.topics = topics
         self.r = redis_instance
-        self.beta = beta
-        self.alpha = alpha
-        self.V = 10000
-        self.sync_rate = sync_rate
 
+        self.push_every = push_every
+        self.pull_every = pull_every
+
+        # Track the local model state
         self.topic_d = defaultdict(lambda: defaultdict(float))
         self.topic_w = defaultdict(lambda: defaultdict(float))
         self.topic_wsum = defaultdict(float)
 
+        # Also track the deltas of the stuff we want to sync
+        self.delta_topic_w = defaultdict(lambda: defaultdict(float))
+        self.delta_topic_wsum = defaultdict(float)
+
         self.documents = []
+
         self.resample_count = 0
 
-    def add_d_w(self, pipe, d, w, z=None):
-        z = str(z)
-        pipe.hincrby(('w', z), w, 1)
-        pipe.incr(('sum', z))
-        pipe.hincrby(('d', d.name), z, 1)
-        d.assignment.append(z)
-        self.topic_d[d][z] += 1
-        self.topic_w[z][intern(w)] += 1
-        self.topic_wsum[z] += 1
-
-    def move_d_w(self, pipe, w, d, i, z, newz):
+    @timed
+    def push_local_state(self):
         """
-        Move w from z to newz
+        Push our current set of deltas to the server
         """
-        newz = str(newz)
-        z = str(z)
-        if newz != z:
-            pipe.hincrby(('w', z), w, -1)
-            pipe.hincrby(('d', d.name), z, -1)
-            pipe.decr(('sum', z), 1)
-            self.topic_d[d][z] += -1
-            self.topic_w[z][intern(w)] += -1
-            self.topic_wsum[z] += -1
-
-            pipe.hincrby(('w', newz), w, 1)
-            pipe.hincrby(('d', d.name), newz, 1)
-            pipe.incr(('sum', newz), 1)
-            self.topic_d[d][newz] += 1
-            self.topic_w[newz][intern(w)] += 1
-            self.topic_wsum[newz] += 1
-
-            d.assignment[i] = z
-
-
-    def insert_new_document(self, d):
-        # sys.stderr.write('Inserting [%s]\n' % d.name)
-        self.documents.append(d)
+        sys.stderr.write('Push local state...\n')
+        # XXX: for now don't sync the document distributions
+        # pipe.hincrby(('d', d.name), z, 1)
         with execute(self.r) as pipe:
-            d.assignment = []
-            for w in d.dense:
-                self.add_d_w(pipe, d, w, z=random.randint(0, self.topics))
+            for z,v in self.delta_topic_w.iteritems():
+                for w, delta in v.iteritems():
+                    pipe.hincrby(('w', z), w, delta)
+            for z, delta in self.delta_topic_wsum.iteritems():
+                pipe.incrby(('sum', z), delta)
+
+        # Reset the deltas
+        self.delta_topic_w = defaultdict(lambda: defaultdict(float))
+        self.delta_topic_wsum = defaultdict(float)
 
     @timed
-    def resync_model(self):
-        sys.stderr.write('skipping resync.\n')
-        return
-        sys.stderr.write('Resync model...\n')
+    def pull_global_state(self):
+        sys.stderr.write('Resync global model...\n')
         self.topic_w = defaultdict(lambda: defaultdict(int))
         self.topic_wsum = defaultdict(float)
 
@@ -95,6 +69,72 @@ class RedisLDA:
                 for w,v in pipe.hgetall(('w', z)).execute()[0].iteritems():
                     self.topic_w[z][w] = float(v)
                 self.topic_wsum[z] = float(pipe.get(('sum', z)).execute()[0])
+
+    def check_resync(self):
+        # Sync the model if necessary
+        self.resample_count += 1
+        if self.resample_count % self.push_every == 0:
+            self.push_local_state()
+        if self.resample_count % self.pull_every == 0:
+            self.pull_global_state()
+
+    def add_d_w(self, d, w, z=None):
+        """
+        Add word w to document d
+        """
+        z = str(z)
+        d.assignment.append(z)
+
+        self.topic_d[d][z] += 1
+        self.topic_w[z][intern(w)] += 1
+        self.topic_wsum[z] += 1
+
+        self.delta_topic_w[z][intern(w)] += 1
+        self.delta_topic_wsum[z] += 1
+
+        self.check_resync()
+
+    def move_d_w(self, w, d, i, oldz, newz):
+        """
+        Move w from oldz to newz
+        """
+        newz = str(newz)
+        oldz = str(oldz)
+        if newz != oldz:
+            self.topic_d[d][oldz] += -1
+            self.topic_w[oldz][intern(w)] += -1
+            self.topic_wsum[oldz] += -1
+
+            self.delta_topic_w[oldz][intern(w)] += -1
+            self.delta_topic_wsum[oldz] += -1
+
+            self.topic_d[d][newz] += 1
+            self.topic_w[newz][intern(w)] += 1
+            self.topic_wsum[newz] += 1
+
+            self.delta_topic_w[newz][intern(w)] += 1
+            self.delta_topic_wsum[newz] += 1
+
+            d.assignment[i] = newz
+
+        self.check_resync()
+
+
+
+class DistributedLDA:
+    def __init__(self, redis_instance, topics=50, alpha=0.1, beta=0.1):
+        self.model = RedisLDAModelCache(redis_instance, topics, pull_every=10000, push_every=100)
+        self.topics = topics
+        self.beta = beta
+        self.alpha = alpha
+        self.V = 10000
+
+    def insert_new_document(self, d):
+        # sys.stderr.write('Inserting [%s]\n' % d.name)
+        self.documents.append(d)
+        d.assignment = []
+        for w in d.dense:
+            self.model.add_d_w(d, w, z=random.randint(0, self.topics))
 
     # @timed
     def get_d(self, d):
@@ -151,6 +191,7 @@ class RedisLDA:
         self.resync_model()
         for iter in range(iterations):
             self.do_iteration(iter)
+        return self
 
     @timed
     def do_iteration(self, iter):
@@ -166,6 +207,7 @@ class RedisLDA:
                 d = Document(line=line)
                 self.insert_new_document(d)
                 self.resample_document(d)
+        return self
 
 
 if __name__ == '__main__':
@@ -174,13 +216,19 @@ if __name__ == '__main__':
  
     parser = ArgumentParser() 
     parser.add_argument("--redis_db", type=int, default=0, help="Which redis DB") 
-    parser.add_argument("--redis_host", type=str, default="localhost:6379", help="Host for redis server") 
+    parser.add_argument("--redis", type=str, default="localhost:6379", help="Host for redis server") 
+
+    # XXX: this doesnt actually work yet
     parser.add_argument("--cores", type=int, default=1, help="Number of cores to use") 
+
     parser.add_argument("--topics", type=int, default=100, help="Number of topics to use") 
     parser.add_argument("--iterations", type=int, default=1000, help="Number of iterations")
+
     parser.add_argument("--document", type=str, required=True, help="File to load as document") 
+
     parser.add_argument("--shards", type=int, default=1, help="Shard the document file into this many") 
     parser.add_argument("--this_shard", type=int, default=0, help="What shard number am I")
+
     options = parser.parse_args(sys.argv[1:]) 
 
     sys.stderr.write('Running on %d cores\n' % options.cores)
@@ -194,24 +242,12 @@ if __name__ == '__main__':
 
     sys.stderr.write('connecting to host %s:%d\n' % (host, int(port)))
     R = redis.StrictRedis(host=host, port=int(port), db=options.redis_db)
+
     sys.stderr.write("XXX: currently assuming unique docnames\n")
-    RLDA = RedisLDA(R, topics=options.topics)
-
-
-    def f((line_no, line)):
-        if line_no % options.shards == options.this_shard:
-            d = Document(line=line)
-            RLDA.insert_new_document(d)
-            RLDA.resample_document(d, line_no)
-            # r = RedisIncrBuffer(max_size=100)
-            # for w in d.dense:
-            #     r.push((w, 1))
-            # r.flush()
 
     if options.cores > 1:
         assert False
         p = Pool(options.cores)
         p.map(f, enumerate(open(options.document)))
 
-    RLDA.load_initial_docs(options)
-    RLDA.iterate(options.iterations)
+    DistributedLDA(R, topics=options.topics).load_initial_docs(options).iterate(options.iterations)

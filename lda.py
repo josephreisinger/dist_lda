@@ -2,7 +2,7 @@ import random
 from math import exp, log
 import sys
 
-# Base class holding a document but not its assignments
+# Base class holding a document and assignment vector
 class Document:
     def __init__(self, name="NULL", line=None):
         self.name = name
@@ -15,10 +15,8 @@ class Document:
 
     def parse_from_line(self, line):
         self.name, word_counts = self.parse_lda_line(line)
-        for w,c in word_counts:
-            for cc in range(c):
-                self.dense.append(intern(w))
-            self.words.add(intern(w))
+        self.dense = [intern(w) for w,c in word_counts for cc in range(c)]
+        self.words = set(self.dense)
         self.nd = len(self.dense)
 
 
@@ -29,19 +27,6 @@ class Document:
 
         return head, [(w, int(c)) for w,c in tokens]
 
-
-def timed(func): 
-    import time 
-    """ 
-    Decorator @timed logs some timing info 
-    """ 
-    def wrapper(*arg, **kwargs): 
-        t1 = time.time() 
-        res = func(*arg, **kwargs) 
-        t2 = time.time() 
-        sys.stderr.write('TIMED %s took %0.3f ms\n' % (func.func_name, (t2-t1)*1000.0)) 
-        return res
-    return wrapper
 
 def addLog(x, y):
     if x == 0:
@@ -71,3 +56,28 @@ def sample_lp_mult(lp):
     
     assert False
     return 0
+
+
+def timed(func): 
+    import time 
+    """ Decorator @timed logs some timing info """ 
+    def wrapper(*arg, **kwargs): 
+        t1 = time.time() 
+        res = func(*arg, **kwargs) 
+        t2 = time.time() 
+        sys.stderr.write('TIMED %s took %0.3f ms\n' % (func.func_name, (t2-t1)*1000.0)) 
+        return res
+    return wrapper
+
+
+@contextmanager
+def transact(r):
+    pipe = r.pipeline()
+    yield pipe
+
+@contextmanager
+def execute(r, transaction=True):
+    pipe = r.pipeline(transaction=transaction)
+    yield pipe
+    pipe.execute()
+

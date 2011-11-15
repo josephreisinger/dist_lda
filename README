@@ -1,3 +1,3 @@
 dist_lda
 
-Lightweight python implementation of distributed LDA
+Lightweight python implementation of a distributed, collapsed gibbs sampler for LDA. Uses redis to coordinate multiple nodes.
