@@ -9,7 +9,6 @@ from lda import *
 
 # XXX: TODO: fix V 
 
-
 class RedisLDAModelCache:
     """
     Holds the current assumed global state and the current local deltas 
@@ -34,13 +33,13 @@ class RedisLDAModelCache:
         self.pull_every = options.pull_every
 
         # Track the local model state
-        self.topic_d = defaultdict(lambda: defaultdict(float))
-        self.topic_w = defaultdict(lambda: defaultdict(float))
+        self.topic_d = defaultdict(lambda: defaultdict(int))
+        self.topic_w = defaultdict(lambda: defaultdict(int))
         self.topic_wsum = defaultdict(float)
 
         # Also track the deltas of the stuff we want to sync
-        self.delta_topic_w = defaultdict(lambda: defaultdict(float))
-        self.delta_topic_wsum = defaultdict(float)
+        self.delta_topic_w = defaultdict(lambda: defaultdict(int))
+        self.delta_topic_wsum = defaultdict(int)
 
         self.documents = []
 
@@ -57,27 +56,33 @@ class RedisLDAModelCache:
         with execute(self.r) as pipe:
             for z,v in self.delta_topic_w.iteritems():
                 for w, delta in v.iteritems():
-                    pipe.hincrby(('w', z), w, delta)
+                    if delta != 0:
+                        pipe.hincrby(('w', z), w, int(delta))
             for z, delta in self.delta_topic_wsum.iteritems():
-                pipe.incr(('sum', z), amount=delta)
+                if delta != 0:
+                    pipe.incr(('sum', z), amount=int(delta))
 
         # Reset the deltas
-        self.delta_topic_w = defaultdict(lambda: defaultdict(float))
-        self.delta_topic_wsum = defaultdict(float)
+        self.delta_topic_w = defaultdict(lambda: defaultdict(int))
+        self.delta_topic_wsum = defaultdict(int)
 
     @timed
     def pull_global_state(self):
         sys.stderr.write('Resync global model...\n')
         self.topic_w = defaultdict(lambda: defaultdict(int))
-        self.topic_wsum = defaultdict(float)
+        self.topic_wsum = defaultdict(int)
 
         with transact(self.r) as pipe:
             for z in range(self.topics):
-                self.topic_w[z] = defaultdict(float)
-                for w,v in pipe.hgetall(('w', z)).execute()[0].iteritems():
-                    self.topic_w[z][w] = float(v)
-                print self.topic_w[z]
-                self.topic_wsum[z] = float(pipe.get(('sum', z)).execute()[0])
+                pipe.hgetall(('w', z))
+            for z, zz in enumerate(pipe.execute()):
+                self.topic_w[z] = defaultdict(int)
+                for w,v in zz.iteritems():
+                    v = int(v)
+                    assert v >= 0
+                    if v > 0:
+                        self.topic_w[z][w] = v
+                self.topic_wsum[z] = int(pipe.get(('sum', z)).execute()[0])
 
     """
     # @timed
@@ -227,6 +232,8 @@ if __name__ == '__main__':
     parser.add_argument("--cores", type=int, default=1, help="Number of cores to use") 
 
     parser.add_argument("--topics", type=int, default=100, help="Number of topics to use") 
+    parser.add_argument("--alpha", type=float, default=0.1, help="Topic assignment smoother")
+    parser.add_argument("--beta", type=float, default=0.1, help="Vocab smoother")
     parser.add_argument("--iterations", type=int, default=1000, help="Number of iterations")
 
     parser.add_argument("--document", type=str, required=True, help="File to load as document") 
