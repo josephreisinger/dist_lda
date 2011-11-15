@@ -107,11 +107,12 @@ class RedisLDAModelCache:
     def check_resync(self):
         # Sync the model if necessary
         if self.resample_count > 100:
-            if self.resample_count % self.push_every == 0:
-                self.push_local_state()
+            # Basically always push local before pulling down otherwise we might get some inconsistencies
             if self.resample_count % self.pull_every == 0:
-                sys.stderr.write('pull global model\n')
+                self.push_local_state()
                 self.pull_global_state()
+            elif self.resample_count % self.push_every == 0:
+                self.push_local_state()
         self.resample_count += 1
 
     def add_d_w(self, d, w, z=None):
