@@ -50,7 +50,7 @@ class RedisLDAModelCache:
                 for w, delta in v.iteritems():
                     pipe.hincrby(('w', z), w, delta)
             for z, delta in self.delta_topic_wsum.iteritems():
-                pipe.incrby(('sum', z), delta)
+                pipe.incr(('sum', z), amount=delta)
 
         # Reset the deltas
         self.delta_topic_w = defaultdict(lambda: defaultdict(float))
@@ -141,7 +141,7 @@ class DistributedLDA:
 
     def insert_new_document(self, d):
         # sys.stderr.write('Inserting [%s]\n' % d.name)
-        self.documents.append(d)
+        self.model.documents.append(d)
         d.assignment = []
         for w in d.dense:
             self.model.add_d_w(d, w, z=random.randint(0, self.topics))
@@ -155,27 +155,29 @@ class DistributedLDA:
         dnd   = log(self.alpha*self.topics + d.nd) 
         tdm1 = defaultdict(float)
         td   = defaultdict(float)
+        m = self.model
         for tz in range(self.topics):
             tz = str(tz)
-            if self.topic_wsum[tz] > 0 and self.topic_d[d][tz] > 0:
-                tdm1[tz] = -log(self.beta*self.V + self.topic_wsum[tz] - 1) + log(self.alpha + self.topic_d[d][tz] - 1) - dndm1
-            td[tz]   = -log(self.beta*self.V + self.topic_wsum[tz]) + log(self.alpha + (self.topic_d[d][tz])) - dnd
+            if m.topic_wsum[tz] > 0 and m.topic_d[d][tz] > 0:
+                tdm1[tz] = -log(self.beta*self.V + m.topic_wsum[tz] - 1) + log(self.alpha + m.topic_d[d][tz] - 1) - dndm1
+            td[tz]   = -log(self.beta*self.V + m.topic_wsum[tz]) + log(self.alpha + (m.topic_d[d][tz])) - dnd
 
         return tdm1, td
 
     # @timed
     def resample_document(self, d):
         tdm1, td = self.cache_params(d)
+        m = self.model
         for i, (w,oldz) in enumerate(izip(d.dense, d.assignment)):
             oldz = str(oldz)
             lp = []
             for tz in range(self.topics):
                 tz = str(tz)
                 if tz == oldz:
-                    assert self.topic_w[tz][w] > 0
-                    lp.append(log(self.beta + self.topic_w[tz][w] - 1) + tdm1[tz])
+                    assert m.topic_w[tz][w] > 0
+                    lp.append(log(self.beta + m.topic_w[tz][w] - 1) + tdm1[tz])
                 else:
-                    lp.append(log(self.beta + self.topic_w[tz][w]) + td[tz])
+                    lp.append(log(self.beta + m.topic_w[tz][w]) + td[tz])
 
             newz = sample_lp_mult(lp)
             self.model.move_d_w(w, d, i, oldz, newz)
@@ -228,9 +230,9 @@ if __name__ == '__main__':
     
     # Get redis host and port
     try:
-        host, port = options.redis_host.split(':')
+        host, port = options.redis.split(':')
     except:
-        host = options.redis_host
+        host = options.redis
         port = 6379
 
     sys.stderr.write('connecting to host %s:%d\n' % (host, int(port)))

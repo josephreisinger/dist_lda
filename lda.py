@@ -1,6 +1,7 @@
-import random
-from math import exp, log
 import sys
+import random
+from contextlib import contextmanager
+from math import exp, log
 
 # Base class holding a document and assignment vector
 class Document:
