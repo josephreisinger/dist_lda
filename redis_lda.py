@@ -174,8 +174,7 @@ if __name__ == '__main__':
  
     parser = ArgumentParser() 
     parser.add_argument("--redis_db", type=int, default=0, help="Which redis DB") 
-    parser.add_argument("--redis_port", type=int, default=26379, help="Port for redis server")
-    parser.add_argument("--redis_host", type=str, default="streetpizza.cs.utexas.edu", help="Host for redis server") 
+    parser.add_argument("--redis_host", type=str, default="localhost:6379", help="Host for redis server") 
     parser.add_argument("--cores", type=int, default=1, help="Number of cores to use") 
     parser.add_argument("--topics", type=int, default=100, help="Number of topics to use") 
     parser.add_argument("--iterations", type=int, default=1000, help="Number of iterations")
@@ -186,11 +185,15 @@ if __name__ == '__main__':
 
     sys.stderr.write('Running on %d cores\n' % options.cores)
     
-    
-    # Flush out the db using this
+    # Get redis host and port
+    try:
+        host, port = options.redis_host.split(':')
+    except:
+        host = options.redis_host
+        port = 6379
 
-    # Database number
-    R = redis.StrictRedis(host=options.redis_host, port=options.redis_port, db=options.redis_db)
+    sys.stderr.write('connecting to host %s:%d\n' % (host, int(port)))
+    R = redis.StrictRedis(host=host, port=int(port), db=options.redis_db)
     sys.stderr.write("XXX: currently assuming unique docnames\n")
     RLDA = RedisLDA(R, topics=options.topics)
 
