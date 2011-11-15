@@ -68,7 +68,6 @@ class RedisLDAModelCache:
 
     @timed
     def pull_global_state(self):
-        sys.stderr.write('Resync global model...\n')
         self.topic_w = defaultdict(lambda: defaultdict(int))
         self.topic_wsum = defaultdict(int)
 
@@ -251,9 +250,17 @@ if __name__ == '__main__':
     
     sys.stderr.write("XXX: currently assuming unique docnames\n")
 
-    if options.cores > 1:
-        assert False
-        p = Pool(options.cores)
-        p.map(f, enumerate(open(options.document)))
+    options.shards = options.cores * options.shards # split up even more
 
-    DistributedLDA(options).load_initial_docs().iterate()
+    def run_local_shard(core_id):
+        options.this_shard = options.this_shard * options.cores + core_id
+        sys.stderr.write('initialize core %d on shard %d\n' % (core_id, options.this_shard))
+        DistributedLDA(options).load_initial_docs().iterate()
+
+    if options.cores > 1:
+        p = Pool(options.cores)
+        p.map(run_local_shard, range(options.cores))
+    else:
+        run_local_shard(0)
+
+
