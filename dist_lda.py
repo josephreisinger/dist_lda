@@ -7,8 +7,8 @@ from itertools import izip
 
 from lda import *
 
+# XXX: TODO: fix V 
 
-# XXX TODO: batch up changes instead of making them on the fly
 
 class RedisLDAModelCache:
     """
@@ -17,7 +17,7 @@ class RedisLDAModelCache:
 
     Currently this holds the entire local model state and can do the sync.
     """
-    def __init__(self, redis_instance, topics, push_every=100, pull_every=10000):
+    def __init__(self, redis_instance, topics, push_every=1e5, pull_every=1e6):
         self.topics = topics
         self.r = redis_instance
 
@@ -133,7 +133,7 @@ class RedisLDAModelCache:
 
 class DistributedLDA:
     def __init__(self, redis_instance, topics=50, alpha=0.1, beta=0.1):
-        self.model = RedisLDAModelCache(redis_instance, topics, pull_every=10000, push_every=100)
+        self.model = RedisLDAModelCache(redis_instance, topics)
         self.topics = topics
         self.beta = beta
         self.alpha = alpha
@@ -196,12 +196,16 @@ class DistributedLDA:
 
     @timed
     def load_initial_docs(self, options):
-        sys.stderr.write('Loading document shard %d...\n' % options.this_shard)
+        sys.stderr.write('Loading document shard %d / %d...\n' % (options.this_shard, options.shards))
+        processed = 0
         for line_no, line in enumerate(open(options.document)):
             if line_no % options.shards == options.this_shard:
                 d = Document(line=line)
                 self.insert_new_document(d)
                 self.resample_document(d)
+                processed += 1
+                if processed % 1e5 == 0:
+                    sys.stderr.write('... loaded %d documents [%s]\n' % (processed, d.name))
         return self
 
 

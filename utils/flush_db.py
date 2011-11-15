@@ -13,6 +13,6 @@ try:
 except:
     host = options.redis
     port = 6379
-R = redis.StrictRedis(host=options.host, port=options.port, db=options.redis_db)
+R = redis.StrictRedis(host=host, port=int(port), db=options.redis_db)
 sys.stderr.write("flushing db\n")
 R.flushdb()
