@@ -70,6 +70,16 @@ class RedisLDAModelCache:
                     self.topic_w[z][w] = float(v)
                 self.topic_wsum[z] = float(pipe.get(('sum', z)).execute()[0])
 
+    """
+    # @timed
+    def get_d(self, d):
+        assert False
+        topic_d = defaultdict(float)
+        for z,v in self.r.hgetall(('d', d.name)).iteritems():
+            topic_d[z] = float(v)
+        return topic_d
+    """
+
     def check_resync(self):
         # Sync the model if necessary
         self.resample_count += 1
@@ -137,15 +147,10 @@ class DistributedLDA:
             self.model.add_d_w(d, w, z=random.randint(0, self.topics))
 
     # @timed
-    def get_d(self, d):
-        assert False
-        topic_d = defaultdict(float)
-        for z,v in self.r.hgetall(('d', d.name)).iteritems():
-            topic_d[z] = float(v)
-        return topic_d
-
-    # @timed
     def cache_params(self, d):
+        """
+        Cache the Gibbs update math for this document
+        """
         dndm1 = log(self.alpha*self.topics + d.nd - 1) 
         dnd   = log(self.alpha*self.topics + d.nd) 
         tdm1 = defaultdict(float)
@@ -156,39 +161,27 @@ class DistributedLDA:
                 tdm1[tz] = -log(self.beta*self.V + self.topic_wsum[tz] - 1) + log(self.alpha + self.topic_d[d][tz] - 1) - dndm1
             td[tz]   = -log(self.beta*self.V + self.topic_wsum[tz]) + log(self.alpha + (self.topic_d[d][tz])) - dnd
 
-        return dndm1, dnd, tdm1, td
+        return tdm1, td
 
     # @timed
-    def update_model(self, d, tdm1, td):
-        with execute(self.r, transaction=False) as pipe:
-            for i, (w,z) in enumerate(izip(d.dense, d.assignment)):
-                z = str(z)
-                lp = []
-                for tz in range(self.topics):
-                    tz = str(tz)
-                    if tz == z:
-                        assert self.topic_w[tz][w] > 0
-                        lp.append(log(self.beta + self.topic_w[tz][w] - 1) + tdm1[tz])
-                    else:
-                        lp.append(log(self.beta + self.topic_w[tz][w]) + td[tz])
-
-                newz = sample_lp_mult(lp)
-                self.move_d_w(pipe, w, d, i, z, newz)
-
     def resample_document(self, d):
-        self.resample_count += 1
-        # self.get_d(d)
-        if self.resample_count > 0 and self.resample_count % self.sync_rate == 0:
-            self.resync_model()
+        tdm1, td = self.cache_params(d)
+        for i, (w,oldz) in enumerate(izip(d.dense, d.assignment)):
+            oldz = str(oldz)
+            lp = []
+            for tz in range(self.topics):
+                tz = str(tz)
+                if tz == oldz:
+                    assert self.topic_w[tz][w] > 0
+                    lp.append(log(self.beta + self.topic_w[tz][w] - 1) + tdm1[tz])
+                else:
+                    lp.append(log(self.beta + self.topic_w[tz][w]) + td[tz])
 
-        # print d.name, topic_d
-        # print topic_w
-
-        dndm1, dnd, tdm1, td = self.cache_params(d)
-        self.update_model(d, tdm1, td)
+            newz = sample_lp_mult(lp)
+            self.model.move_d_w(w, d, i, oldz, newz)
 
     def iterate(self, iterations):
-        self.resync_model()
+        self.model.pull_global_state()
         for iter in range(iterations):
             self.do_iteration(iter)
         return self
