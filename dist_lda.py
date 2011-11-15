@@ -1,6 +1,7 @@
 import sys
 import redis
 import random
+import heapq
 from math import log
 from collections import defaultdict
 from itertools import izip
@@ -82,7 +83,6 @@ class RedisLDAModelCache:
                     if v > 0:
                         self.topic_w[z][w] = v
                 self.topic_wsum[z] = int(pipe.get(('sum', z)).execute()[0])
-                sys.stderr.write('[TOPIC %d] :: %s\n' % (z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.topic_to_string(self.topic_w[z])])))
     
     @staticmethod
     def topic_to_string(topic, max_length=20):
@@ -92,7 +92,7 @@ class RedisLDAModelCache:
                 heapq.heappushpop(result, (c,w))
             else:
                 heapq.heappush(result, (c,w))
-        return heapq.nlargest(result, max_length)
+        return heapq.nlargest(max_length, result)
 
     """
     # @timed
@@ -106,11 +106,13 @@ class RedisLDAModelCache:
 
     def check_resync(self):
         # Sync the model if necessary
+        if self.resample_count > 100:
+            if self.resample_count % self.push_every == 0:
+                self.push_local_state()
+            if self.resample_count % self.pull_every == 0:
+                sys.stderr.write('pull global model\n')
+                self.pull_global_state()
         self.resample_count += 1
-        if self.resample_count % self.push_every == 0:
-            self.push_local_state()
-        if self.resample_count % self.pull_every == 0:
-            self.pull_global_state()
 
     def add_d_w(self, d, w, z=None):
         """
@@ -213,7 +215,10 @@ class DistributedLDA:
     def do_iteration(self, iter):
         for d in self.model.documents:
             self.resample_document(d)
-        sys.stderr.write('done iter=%d\n' % iter)
+        # Print out the topics
+        for z in range(self.topics):
+            sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.model.topic_to_string(self.model.topic_w[z])])))
+        sys.stderr.write('----------done iter=%d\n' % iter)
 
     @timed
     def load_initial_docs(self):
@@ -227,6 +232,8 @@ class DistributedLDA:
                 processed += 1
                 if processed % 1000 == 0:
                     sys.stderr.write('... loaded %d documents [%s]\n' % (processed, d.name))
+        sys.stderr.write("Loaded %d docs from [%s]\n" % (processed, self.options.document))
+        assert processed > 0 # No Documents!
         return self
 
 
