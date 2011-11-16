@@ -24,9 +24,9 @@ class Document:
     @staticmethod
     def parse_lda_line(line):
         head, _, tokens = line.partition('\t')
-        tokens = [x.split(':') for x in tokens.split('\t')]
+        tokens = [x.rpartition(':') for x in tokens.split('\t')]
 
-        return head, [(w, int(c)) for w,c in tokens]
+        return head, [(w, int(c)) for w,_,c in tokens]
 
 
 def addLog(x, y):

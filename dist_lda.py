@@ -69,6 +69,9 @@ class RedisLDAModelCache:
 
     @timed
     def pull_global_state(self):
+        # XXX: always push the local state first
+        self.push_local_state()
+
         self.topic_w = defaultdict(lambda: defaultdict(int))
         self.topic_wsum = defaultdict(int)
 
@@ -109,7 +112,6 @@ class RedisLDAModelCache:
         if self.resample_count > 100:
             # Basically always push local before pulling down otherwise we might get some inconsistencies
             if self.resample_count % self.pull_every == 0:
-                self.push_local_state()
                 self.pull_global_state()
             elif self.resample_count % self.push_every == 0:
                 self.push_local_state()
@@ -151,7 +153,7 @@ class RedisLDAModelCache:
 
             d.assignment[i] = newz
 
-        self.check_resync()
+            self.check_resync()
 
 
 
@@ -196,6 +198,7 @@ class DistributedLDA:
             lp = []
             for tz in range(self.topics):
                 if tz == oldz:
+                    assert type(tz) == type(oldz)
                     assert m.topic_w[tz][w] > 0
                     lp.append(log(self.beta + m.topic_w[tz][w] - 1) + tdm1[tz])
                 else:
