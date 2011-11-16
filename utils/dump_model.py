@@ -17,12 +17,12 @@ except:
     port = 6379
 R = redis.StrictRedis(host=host, port=int(port), db=options.redis_db)
 
-model_type = R.get('model_type')
+model= R.get('model')
 topics = R.get('topics')
 alpha = R.get('alpha')
 beta = R.get('beta')
 
-print '%s\t%s\t%s\t%s' % (model_type, topics, alpha, beta)
+print '%s\t%s\t%s\t%s' % (model, topics, alpha, beta)
 
 with transact(self.r) as pipe:
     for z in range(topics):

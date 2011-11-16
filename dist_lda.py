@@ -31,6 +31,7 @@ class RedisLDAModelCache:
         self.topics = options.topics
 
         # Store some metadata
+        self.r.set('model', 'lda')
         self.r.set('topics', options.topics)
         self.r.set('alpha', options.alpha)
         self.r.set('beta', options.beta)
