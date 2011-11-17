@@ -1,4 +1,5 @@
 import redis
+import json
 import sys
 from lda import *
 from collections import defaultdict
@@ -18,22 +19,28 @@ except:
 R = redis.StrictRedis(host=host, port=int(port), db=options.redis_db)
 
 model= R.get('model')
-topics = R.get('topics')
-alpha = R.get('alpha')
-beta = R.get('beta')
+topics = int(R.get('topics'))
+alpha = float(R.get('alpha'))
+beta = float(R.get('beta'))
 
-print '%s\t%s\t%s\t%s' % (model, topics, alpha, beta)
 
-with transact(self.r) as pipe:
+d = {}
+d['model'] = model
+d['topics'] = topics
+d['alpha'] = alpha
+d['beta'] = beta
+d['params'] = defaultdict(lambda: defaultdict(int))
+
+with transact(R) as pipe:
     for z in range(topics):
         pipe.hgetall(('w', z))
     for z, zz in enumerate(pipe.execute()):
-        topic_w[z] = defaultdict(int)
         for w,v in zz.iteritems():
             v = int(v)
             assert v >= 0
             if v > 0:
-                print '%s\t%s\t%d' % (z, w, v)
+                d['params'][z][w] = v
 
 
+print json.dumps(d)
 

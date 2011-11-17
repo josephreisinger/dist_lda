@@ -45,6 +45,7 @@ class RedisLDAModelCache:
         self.topic_wsum = defaultdict(float)
 
         # Also track the deltas of the stuff we want to sync
+        self.delta_topic_d = defaultdict(lambda: defaultdict(int))
         self.delta_topic_w = defaultdict(lambda: defaultdict(int))
         self.delta_topic_wsum = defaultdict(int)
 
@@ -58,23 +59,27 @@ class RedisLDAModelCache:
         Push our current set of deltas to the server
         """
         # sys.stderr.write('Push local state...\n')
-        # XXX: for now don't sync the document distributions
-        # pipe.hincrby(('d', d.name), z, 1)
         with execute(self.r) as pipe:
+            for z,v in self.delta_topic_d.iteritems():
+                for d, delta in v.iteritems():
+                    if delta != 0:
+                        pipe.hincrby(('d', z), d, int(delta))
             for z,v in self.delta_topic_w.iteritems():
                 for w, delta in v.iteritems():
                     if delta != 0:
                         pipe.hincrby(('w', z), w, int(delta))
             for z, delta in self.delta_topic_wsum.iteritems():
                 if delta != 0:
-                    pipe.incr(('sum', z), amount=int(delta))
+                    pipe.incr(('wsum', z), amount=int(delta))
 
         # Reset the deltas
+        self.delta_topic_d = defaultdict(lambda: defaultdict(int))
         self.delta_topic_w = defaultdict(lambda: defaultdict(int))
         self.delta_topic_wsum = defaultdict(int)
 
     @timed
     def pull_global_state(self):
+        # Note we don't need to pull the d state, since our shard is 100% responsible for it
         # XXX: always push the local state first
         self.push_local_state()
 
@@ -91,7 +96,7 @@ class RedisLDAModelCache:
                     assert v >= 0
                     if v > 0:
                         self.topic_w[z][w] = v
-                self.topic_wsum[z] = int(pipe.get(('sum', z)).execute()[0])
+                self.topic_wsum[z] = int(pipe.get(('wsum', z)).execute()[0])
     
     @staticmethod
     def topic_to_string(topic, max_length=20):
@@ -129,10 +134,11 @@ class RedisLDAModelCache:
         """
         d.assignment.append(z)
 
-        self.topic_d[d][z] += 1
+        self.topic_d[z][intern(d.name)] += 1
         self.topic_w[z][intern(w)] += 1
         self.topic_wsum[z] += 1
 
+        self.delta_topic_d[z][intern(d.name)] += 1
         self.delta_topic_w[z][intern(w)] += 1
         self.delta_topic_wsum[z] += 1
 
@@ -143,17 +149,19 @@ class RedisLDAModelCache:
         Move w from oldz to newz
         """
         if newz != oldz:
-            self.topic_d[d][oldz] += -1
+            self.topic_d[oldz][intern(d.name)] += -1
             self.topic_w[oldz][intern(w)] += -1
             self.topic_wsum[oldz] += -1
 
+            self.delta_topic_d[oldz][intern(d.name)] += -1
             self.delta_topic_w[oldz][intern(w)] += -1
             self.delta_topic_wsum[oldz] += -1
 
-            self.topic_d[d][newz] += 1
+            self.topic_d[newz][intern(d.name)] += 1
             self.topic_w[newz][intern(w)] += 1
             self.topic_wsum[newz] += 1
 
+            self.delta_topic_d[newz][intern(d.name)] += 1
             self.delta_topic_w[newz][intern(w)] += 1
             self.delta_topic_wsum[newz] += 1
 
@@ -190,9 +198,9 @@ class DistributedLDA:
         td   = defaultdict(float)
         m = self.model
         for tz in range(self.topics):
-            if m.topic_wsum[tz] > 0 and m.topic_d[d][tz] > 0:
-                tdm1[tz] = -log(self.beta*self.V + m.topic_wsum[tz] - 1) + log(self.alpha + m.topic_d[d][tz] - 1) - dndm1
-            td[tz]   = -log(self.beta*self.V + m.topic_wsum[tz]) + log(self.alpha + (m.topic_d[d][tz])) - dnd
+            if m.topic_wsum[tz] > 0 and m.topic_d[tz][intern(d.name)] > 0:
+                tdm1[tz] = -log(self.beta*self.V + m.topic_wsum[tz] - 1) + log(self.alpha + m.topic_d[tz][intern(d.name)] - 1) - dndm1
+            td[tz]   = -log(self.beta*self.V + m.topic_wsum[tz]) + log(self.alpha + (m.topic_d[tz][intern(d.name)])) - dnd
 
         return tdm1, td
 
