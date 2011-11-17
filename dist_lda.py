@@ -64,19 +64,20 @@ class RedisLDAModelCache:
             for z,v in self.delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
                     if self.topic_d[z][d] == 0:  # This works because we're document sharding
-                        pipe.hdel(('d', z), d)
+                        pipe.zrem(('d', z), d)
                     else:
-                        pipe.hincrby(('d', z), d, delta)
+                        pipe.zincrby(('d', z), d, delta)
 
             # Update topic state
             for z,v in self.delta_topic_w.iteritems():
                 for w, delta in v.iteritems():
                     if delta != 0:
-                        pipe.hincrby(('w', z), w, delta)
+                        pipe.zincrby(('w', z), w, delta)
             # Update sums
             for z, delta in self.delta_topic_wsum.iteritems():
                 if delta != 0:
                     pipe.incr(('wsum', z), amount=delta)
+
 
         # Reset the deltas
         self.delta_topic_d = defaultdict(lambda: defaultdict(int))
@@ -93,20 +94,46 @@ class RedisLDAModelCache:
         self.topic_w = defaultdict(lambda: defaultdict(int))
         self.topic_wsum = defaultdict(int)
 
+        # Pull down the global state. Optionally, if we're the master shard (0) then 
+        # delete all the hash keys with value 0 to save memory
         with transact(self.r) as pipe:
             for z in range(self.topics):
-                pipe.hgetall(('w', z))
+                # This is clever because it avoids sending the zeros over the wire
+                pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
             for z, zz in enumerate(pipe.execute()):
                 self.topic_w[z] = defaultdict(int)
-                for w,v in zz.iteritems():
+                for w,v in zz:
                     v = int(v)
-                    assert v >= 0
-                    if v > 0:
-                        self.topic_w[z][w] = v
-                    else:
-                        pipe.hdel(('w', z), w)  # clean up the trash
-                pipe.execute() # run all the hdels
+                    assert v > 0
+                    self.topic_w[z][w] = v
+
                 self.topic_wsum[z] = int(pipe.get(('wsum', z)).execute()[0])
+
+        """
+        # Get the global state and compact the database 
+        # XXX: this needs to be structured transactionally using watch otherwise 
+        for z in range(self.topics):
+            self.r.transaction(self.pull_and_compact(z), ('w', z))
+                    elif self.options.this_shard == 0:
+                        pipe.hdel(('w', z), w)  # clean up the trash
+
+        """
+        """
+        >>> def client_side_incr(pipe):
+            ...     current_value = pipe.get('OUR-SEQUENCE-KEY')
+            ...     next_value = int(current_value) + 1
+            ...     pipe.multi()
+            ...     pipe.set('OUR-SEQUENCE-KEY', next_value)
+            >>>
+            >>> r.transaction(client_side_incr, 'OUR-SEQUENCE-KEY')
+
+
+        def pull_and_compact(self, z):
+            def _f(pipe):
+                wz = pipe.hgetall(('w', z))
+                for zz in pipe.hgetall(('w', z)):
+        """
+
     
     @staticmethod
     def topic_to_string(topic, max_length=20):
