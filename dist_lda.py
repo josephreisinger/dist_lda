@@ -63,7 +63,9 @@ class RedisLDAModelCache:
             # Update document state from deltas
             for z,v in self.delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
-                    if delta != 0:
+                    if self.topic_d[z][d] == 0:  # This works because we're document sharding
+                        pipe.hdel(('d', z), d)
+                    else:
                         pipe.hincrby(('d', z), d, delta)
 
             # Update topic state
@@ -75,15 +77,6 @@ class RedisLDAModelCache:
             for z, delta in self.delta_topic_wsum.iteritems():
                 if delta != 0:
                     pipe.incr(('wsum', z), amount=delta)
-
-        # Cut out the zero'd document hash keys
-        with execute(self.r) as pipe:
-            for z,v in self.delta_topic_d.iteritems():
-                for d, delta in v.iteritems():
-                    val = delta + self.topic_d[z][d]
-                    assert val >= 0
-                    if val == 0:
-                        pipe.hdel(('d', z), d)
 
         # Reset the deltas
         self.delta_topic_d = defaultdict(lambda: defaultdict(int))
@@ -112,7 +105,7 @@ class RedisLDAModelCache:
                         self.topic_w[z][w] = v
                     else:
                         pipe.hdel(('w', z), w)  # clean up the trash
-                pipe.execute()
+                pipe.execute() # run all the hdels
                 self.topic_wsum[z] = int(pipe.get(('wsum', z)).execute()[0])
     
     @staticmethod
