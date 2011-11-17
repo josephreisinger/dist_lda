@@ -37,7 +37,6 @@ class RedisLDAModelCache:
         self.r.set('beta', options.beta)
 
         self.push_every = options.push_every
-        self.pull_every = options.pull_every
 
         # Track the local model state
         self.topic_d = defaultdict(lambda: defaultdict(int))
@@ -97,6 +96,8 @@ class RedisLDAModelCache:
         # Pull down the global state. Optionally, if we're the master shard (0) then 
         # delete all the hash keys with value 0 to save memory
         with transact(self.r) as pipe:
+            # XXX: todo: test using remrangebyscore(0,0) and then revrangebyscore(-inf, inf)
+            # Also count that we're not losing any data
             for z in range(self.topics):
                 # This is clever because it avoids sending the zeros over the wire
                 pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
@@ -158,10 +159,7 @@ class RedisLDAModelCache:
     def check_resync(self):
         # Sync the model if necessary
         if self.resample_count > 100:
-            # Basically always push local before pulling down otherwise we might get some inconsistencies
-            if self.resample_count % self.pull_every == 0:
-                self.pull_global_state()
-            elif self.resample_count % self.push_every == 0:
+            if self.resample_count % self.push_every == 0:
                 self.push_local_state()
         self.resample_count += 1
 
@@ -315,7 +313,7 @@ if __name__ == '__main__':
 
     # Resync intervals
     parser.add_argument("--push_every", type=int, default=2e5, help="How often to push the local model updates")
-    parser.add_argument("--pull_every", type=int, default=1e6, help="How often to pull the global model state")
+    # Currently pull is every iteration 
 
     options = parser.parse_args(sys.argv[1:]) 
 
