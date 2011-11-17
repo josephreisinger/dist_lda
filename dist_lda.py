@@ -63,14 +63,14 @@ class RedisLDAModelCache:
             for z,v in self.delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
                     if delta != 0:
-                        pipe.hincrby(('d', z), d, int(delta))
+                        pipe.hincrby(('d', z), d, delta)
             for z,v in self.delta_topic_w.iteritems():
                 for w, delta in v.iteritems():
                     if delta != 0:
-                        pipe.hincrby(('w', z), w, int(delta))
+                        pipe.hincrby(('w', z), w, delta)
             for z, delta in self.delta_topic_wsum.iteritems():
                 if delta != 0:
-                    pipe.incr(('wsum', z), amount=int(delta))
+                    pipe.incr(('wsum', z), amount=delta)
 
         # Reset the deltas
         self.delta_topic_d = defaultdict(lambda: defaultdict(int))
@@ -80,7 +80,8 @@ class RedisLDAModelCache:
     @timed
     def pull_global_state(self):
         # Note we don't need to pull the d state, since our shard is 100% responsible for it
-        # XXX: always push the local state first
+
+        # XXX: always push the local state first, otherwise we'll end up with inconsistencies
         self.push_local_state()
 
         self.topic_w = defaultdict(lambda: defaultdict(int))
