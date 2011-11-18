@@ -110,7 +110,7 @@ class RedisLDAModelCache:
                     assert v > 0
                     self.topic_w[z][w] = v
 
-            self.topic_wsum = {k:int(v) for k,v in pipe.hgetall('wsum').execute().iteritems()}
+            self.topic_wsum = defaultdict(int, {int(k):int(v) for k,v in pipe.hgetall('wsum').execute()[0].iteritems()})
 
     
     @staticmethod

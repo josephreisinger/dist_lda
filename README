@@ -9,3 +9,4 @@ TODO:
 -- Shard topics over multiple redis servers (redis_cluster?)
 -- enumerate strings or otherwise low-bit hash to reduce mem footprint
 -- invert topic->word hashes to be word->topic . This way each word string is only stored once in redis, at the cost of significantly more pipelining
+-- massive amount of benchmarking
