@@ -76,7 +76,7 @@ class RedisLDAModelCache:
             # Update sums
             for z, delta in self.delta_topic_wsum.iteritems():
                 if delta != 0:
-                    pipe.incr(('wsum', z), amount=delta)
+                    pipe.hincrby('wsum', z, delta)
 
 
         # Reset the deltas
@@ -94,10 +94,11 @@ class RedisLDAModelCache:
         self.topic_w = defaultdict(lambda: defaultdict(int))
         self.topic_wsum = defaultdict(int)
 
-        # Pull down the global state. Optionally, if we're the master shard (0) then 
-        # delete all the hash keys with value 0 to save memory
+        # Pull down the global state
         with transact(self.r) as pipe:
-            # XXX: todo: test using remrangebyscore(0,0) and then revrangebyscore(-inf, inf)
+            # test using remrangebyscore(0,0) and then revrangebyscore(-inf, inf)
+            for z in range(self.topics):
+                pipe.zremrangebyscore(('w', z), 0, 0).execute()
             # Also count that we're not losing any data
             for z in range(self.topics):
                 # This is clever because it avoids sending the zeros over the wire
@@ -109,32 +110,7 @@ class RedisLDAModelCache:
                     assert v > 0
                     self.topic_w[z][w] = v
 
-                self.topic_wsum[z] = int(pipe.get(('wsum', z)).execute()[0])
-
-        """
-        # Get the global state and compact the database 
-        # XXX: this needs to be structured transactionally using watch otherwise 
-        for z in range(self.topics):
-            self.r.transaction(self.pull_and_compact(z), ('w', z))
-                    elif self.options.this_shard == 0:
-                        pipe.hdel(('w', z), w)  # clean up the trash
-
-        """
-        """
-        >>> def client_side_incr(pipe):
-            ...     current_value = pipe.get('OUR-SEQUENCE-KEY')
-            ...     next_value = int(current_value) + 1
-            ...     pipe.multi()
-            ...     pipe.set('OUR-SEQUENCE-KEY', next_value)
-            >>>
-            >>> r.transaction(client_side_incr, 'OUR-SEQUENCE-KEY')
-
-
-        def pull_and_compact(self, z):
-            def _f(pipe):
-                wz = pipe.hgetall(('w', z))
-                for zz in pipe.hgetall(('w', z)):
-        """
+            self.topic_wsum = {k:int(v) for k,v in pipe.hgetall('wsum').execute().iteritems()}
 
     
     @staticmethod
