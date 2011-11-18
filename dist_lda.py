@@ -35,6 +35,7 @@ class RedisLDAModelCache:
         self.r.set('topics', options.topics)
         self.r.set('alpha', options.alpha)
         self.r.set('beta', options.beta)
+        self.r.set('document', options.document)
 
         self.push_every = options.push_every
 

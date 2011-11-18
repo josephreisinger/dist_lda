@@ -30,11 +30,13 @@ d['model'] = model
 d['topics'] = topics
 d['alpha'] = alpha
 d['beta'] = beta
+d['document'] = document
 d['w'] = defaultdict(lambda: defaultdict(int))
 d['d'] = defaultdict(lambda: defaultdict(int))
 
+doc_name = document.split('/')[-1]
 
-with gzip.open('MODEL_%s-T%d-alpha%.3f-beta%.3f.json.gz', 'w') as w:
+with gzip.open('MODEL_%s-%s-T%d-alpha%.3f-beta%.3f.json.gz' % (model, doc_name, topics, alpha, beta), 'w') as f:
     with transact(R) as pipe:
         for z in range(topics):
             pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
@@ -46,9 +48,9 @@ with gzip.open('MODEL_%s-T%d-alpha%.3f-beta%.3f.json.gz', 'w') as w:
         for z in range(topics):
             pipe.zrevrangebyscore(('d', z), float('inf'), 1, withscores=True)
         for z, zz in enumerate(pipe.execute()):
-            for d,v in zz:
-                d['d'][z][d] = int(v)
+            for doc,v in zz:
+                d['d'][z][doc] = int(v)
 
 
-    w.write(json.dumps(d))
+    f.write(json.dumps(d))
 
