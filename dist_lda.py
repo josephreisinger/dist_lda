@@ -282,7 +282,7 @@ class DistributedLDA:
         # Print out the topics
         for z in range(self.topics):
             sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.model.topic_to_string(self.model.topic_w[z])])))
-        sys.stderr.write('----------done iter=%d (%d swaps %.4f%%)\n' % (iter, self.swaps, self.swaps / float(self.attempts))
+        sys.stderr.write('----------done iter=%d (%d swaps %.4f%%)\n' % (iter, self.swaps, self.swaps / float(self.attempts)))
 
     @timed
     def load_initial_docs(self):
