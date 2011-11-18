@@ -6,7 +6,7 @@ from math import log
 from collections import defaultdict
 from itertools import izip
 
-from lda import *
+from lda_utils import *
 
 # XXX: TODO: fix V 
 
@@ -215,6 +215,11 @@ class DistributedLDA:
         self.V = 10000
         self.options = options
 
+        # Record some stats on what's going on
+        self.swaps = 0
+        self.attempts = 0
+
+
     def insert_new_document(self, d):
         # sys.stderr.write('Inserting [%s]\n' % d.name)
         self.model.documents.append(d)
@@ -256,6 +261,10 @@ class DistributedLDA:
             newz = sample_lp_mult(lp)
             self.model.move_d_w(w, d, i, oldz, newz)
 
+            self.attempts += 1
+            if newz != oldz:
+                self.swaps += 1
+
     def iterate(self, iterations=None):
         if iterations == None:
             iterations = self.options.iterations
@@ -266,12 +275,13 @@ class DistributedLDA:
 
     @timed
     def do_iteration(self, iter):
+        self.swaps, self.attempts = 0, 0
         for d in self.model.documents:
             self.resample_document(d)
         # Print out the topics
         for z in range(self.topics):
             sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.model.topic_to_string(self.model.topic_w[z])])))
-        sys.stderr.write('----------done iter=%d\n' % iter)
+        sys.stderr.write('----------done iter=%d (%d swaps %.4f%%)\n' % (iter, self.swaps, self.swaps / float(self.attempts))
 
     @timed
     def load_initial_docs(self):

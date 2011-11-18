@@ -1,7 +1,8 @@
 import redis
 import json
 import sys
-from lda import *
+import gzip
+from lda_utils import *
 from collections import defaultdict
 from argparse import ArgumentParser 
 
@@ -29,18 +30,25 @@ d['model'] = model
 d['topics'] = topics
 d['alpha'] = alpha
 d['beta'] = beta
-d['params'] = defaultdict(lambda: defaultdict(int))
-
-with transact(R) as pipe:
-    for z in range(topics):
-        pipe.hgetall(('w', z))
-    for z, zz in enumerate(pipe.execute()):
-        for w,v in zz.iteritems():
-            v = int(v)
-            assert v >= 0
-            if v > 0:
-                d['params'][z][w] = v
+d['w'] = defaultdict(lambda: defaultdict(int))
+d['d'] = defaultdict(lambda: defaultdict(int))
 
 
-print json.dumps(d)
+with gzip.open('MODEL_%s-T%d-alpha%.3f-beta%.3f.json.gz', 'w') as w:
+    with transact(R) as pipe:
+        for z in range(topics):
+            pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
+        for z, zz in enumerate(pipe.execute()):
+            for w,v in zz:
+                d['w'][z][w] = int(v)
+
+        # get documents
+        for z in range(topics):
+            pipe.zrevrangebyscore(('d', z), float('inf'), 1, withscores=True)
+        for z, zz in enumerate(pipe.execute()):
+            for d,v in zz:
+                d['d'][z][d] = int(v)
+
+
+    w.write(json.dumps(d))
 
