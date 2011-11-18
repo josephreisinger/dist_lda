@@ -288,7 +288,7 @@ class DistributedLDA:
     def load_initial_docs(self):
         sys.stderr.write('Loading document shard %d / %d...\n' % (self.options.this_shard, self.options.shards))
         processed = 0
-        for line_no, line in enumerate(open(self.options.document)):
+        for line_no, line in enumerate(open_or_gz(self.options.document)):
             if line_no % self.options.shards == self.options.this_shard:
                 d = Document(line=line)
                 self.insert_new_document(d)

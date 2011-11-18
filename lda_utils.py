@@ -82,3 +82,10 @@ def execute(r, transaction=True):
     yield pipe
     pipe.execute()
 
+
+def open_or_gz(f):
+    if f.endswith('gz'):
+        import gzip
+        return gzip.open(f)
+    else:
+        return open(f)
