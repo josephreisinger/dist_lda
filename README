@@ -10,3 +10,7 @@ TODO:
 -- enumerate strings or otherwise low-bit hash to reduce mem footprint
 -- invert topic->word hashes to be word->topic . This way each word string is only stored once in redis, at the cost of significantly more pipelining
 -- massive amount of benchmarking
+
+
+BUGS:
+-- If individual processes die and restart, you'll get duplicate zombie words in the global state; fixing this would require significant re-architecting and would probably be too slow

@@ -37,8 +37,6 @@ class RedisLDAModelCache:
         self.r.set('beta', options.beta)
         self.r.set('document', options.document)
 
-        self.push_every = options.push_every
-
         # Track the local model state
         self.topic_d = defaultdict(lambda: defaultdict(int))
         self.topic_w = defaultdict(lambda: defaultdict(int))
@@ -133,13 +131,6 @@ class RedisLDAModelCache:
         return topic_d
     """
 
-    def check_resync(self):
-        # Sync the model if necessary
-        if self.resample_count > 100:
-            if self.resample_count % self.push_every == 0:
-                self.push_local_state()
-        self.resample_count += 1
-
     def add_d_w(self, d, w, z=None):
         """
         Add word w to document d
@@ -153,8 +144,6 @@ class RedisLDAModelCache:
         self.delta_topic_d[z][intern(d.name)] += 1
         self.delta_topic_w[z][intern(w)] += 1
         self.delta_topic_wsum[z] += 1
-
-        self.check_resync()
 
     def move_d_w(self, w, d, i, oldz, newz):
         """
@@ -178,9 +167,6 @@ class RedisLDAModelCache:
             self.delta_topic_wsum[newz] += 1
 
             d.assignment[i] = newz
-
-            self.check_resync()
-
 
 
 class DistributedLDA:
@@ -245,8 +231,9 @@ class DistributedLDA:
     def iterate(self, iterations=None):
         if iterations == None:
             iterations = self.options.iterations
-        self.model.pull_global_state()
         for iter in range(iterations):
+            if iter % options.sync_every == 0:
+                self.model.pull_global_state()
             self.do_iteration(iter)
         return self
 
@@ -258,7 +245,7 @@ class DistributedLDA:
         # Print out the topics
         for z in range(self.topics):
             sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.model.topic_to_string(self.model.topic_w[z])])))
-        sys.stderr.write('----------done iter=%d (%d swaps %.4f%%)\n' % (iter, self.swaps, 100 * self.swaps / float(self.attempts)))
+        sys.stderr.write('|| DONE core=%d iter=%d (%d swaps %.4f%%)\n' % (self.options.core_id, iter, self.swaps, 100 * self.swaps / float(self.attempts)))
 
     @timed
     def load_initial_docs(self):
@@ -299,7 +286,7 @@ if __name__ == '__main__':
     parser.add_argument("--this_shard", type=int, default=0, help="What shard number am I")
 
     # Resync intervals
-    parser.add_argument("--push_every", type=int, default=2e5, help="How often to push the local model updates")
+    parser.add_argument("--sync_every", type=int, default=1, help="How many iterations should we wait to sync?")
     # Currently pull is every iteration 
 
     options = parser.parse_args(sys.argv[1:]) 
@@ -314,6 +301,7 @@ if __name__ == '__main__':
         # The basic idea here is the multiply the number of shards by the number of cores and
         # split them up even more
         options.this_shard = options.this_shard * options.cores + core_id
+        options.core_id = core_id
         sys.stderr.write('initialize core %d on shard %d\n' % (core_id, options.this_shard))
         DistributedLDA(options).load_initial_docs().iterate()
 
