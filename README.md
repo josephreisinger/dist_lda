@@ -32,6 +32,8 @@ Finally, optionally start up a listener to dump the model to disk every so often
 pypy listener.py --redis=server.path:6379 --write_every=1
 ```
 
+This will generate a gzipped json representation of the model.
+
 ## Performance
 * The current performance bottleneck seems to be the redis server, since a ton of information is being swapped around. Anecdotally I've found one master can coordinate up to ~20 model shards before performance starts to degrade. Current work is to distribute the model across multiple redii (say, hashed by topic).
 
@@ -43,6 +45,7 @@ pypy listener.py --redis=server.path:6379 --write_every=1
 * massive amount of benchmarking
 * Support for sharded data files instead of single massive ones
 * Automatic database flushing to avoid incorporating bits of stale models
+* Support for inference (duh)
 
 ## BUGS
 * If individual processes die and restart, you'll get duplicate zombie words in the global state; fixing this would require some non trivial architectural work, and doesnt seem justified given the impact on the model.
