@@ -9,8 +9,13 @@ approximating the markov chain. I'm confident that there is a convergence
 proof, but its too large to fit in the margin of this README.
 
 ## Run
-1 First start your redis somewhere 
+1. First start your redis somewhere 
     ./src/redis-server redis.conf
+2. Next 
+    ./pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=0 --redis=redis.server.path:6379 --sync_every=1
+    ./pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=1 --redis=redis.server.path:6379 --sync_every=1
+    ./pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=2 --redis=redis.server.path:6379 --sync_every=1
+    ./pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=3 --redis=redis.server.path:6379 --sync_every=1
 
 ## TODO
 * Model dumping subscription service
@@ -18,6 +23,7 @@ proof, but its too large to fit in the margin of this README.
 * enumerate strings or otherwise low-bit hash to reduce mem footprint
 * invert topic->word hashes to be word->topic . This way each word string is only stored once in redis, at the cost of significantly more pipelining
 * massive amount of benchmarking
+* Support for sharded data files instead of single massive ones
 
 ## PERF
 * The current performance bottleneck seems to be the redis server, since a ton of information is being swapped around. Anecdotally I've found one master can coordinate up to ~20 model shards before performance starts to degrade. Current work is to distribute the model across multiple redii (say, hashed by topic).
