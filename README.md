@@ -18,11 +18,12 @@ proof, but its too large to fit in the margin of this README.
 2. Next 
 
 ```
-./pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=0 --redis=redis.server.path:6379 --sync_every=1
-./pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=1 --redis=redis.server.path:6379 --sync_every=1
-./pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=2 --redis=redis.server.path:6379 --sync_every=1
-./pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=3 --redis=redis.server.path:6379 --sync_every=1
+pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=0 --redis=server.path:6379 --sync_every=1
+pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=1 --redis=server.path:6379 --sync_every=1
+pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=2 --redis=server.path:6379 --sync_every=1
+pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=3 --redis=server.path:6379 --sync_every=1
 ```
+(I recommend pypy because currently its faster than python, and I'm not using numpy libraries)
 
 ## TODO
 * Model dumping subscription service
@@ -42,7 +43,7 @@ proof, but its too large to fit in the margin of this README.
 
 ## CONTACT
 [Joseph Reisinger](http://www.cs.utexas.edu/~joeraii)
-@josephreisinger
+[@josephreisinger](http://www.twitter.com/josephreisinger)
 
 ## LICENSE
 
