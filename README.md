@@ -37,7 +37,6 @@ pypy listener.py --redis=server.path:6379 --write_every=1
 
 
 ## Future Work
-* Model dumping subscription service
 * Shard topics over multiple redis servers (redis_cluster?)
 * enumerate strings or otherwise low-bit hash to reduce mem footprint
 * invert topic->word hashes to be word->topic . This way each word string is only stored once in redis, at the cost of significantly more pipelining
