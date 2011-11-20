@@ -1,4 +1,5 @@
 import redis
+import heapq
 from redis_utils import connect_redis_string, transact, execute
 from utils import timed
 from collections import defaultdict
