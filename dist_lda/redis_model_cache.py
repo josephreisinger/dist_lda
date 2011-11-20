@@ -9,15 +9,7 @@ class RedisLDAModelCache:
     Currently this holds the entire local model state and can do the sync.
     """
     def __init__(self, options):
-        # Get redis host and port
-        try:
-            host, port = options.redis.split(':')
-        except:
-            host = options.redis
-            port = 6379
-
-        sys.stderr.write('connecting to host %s:%d\n' % (host, int(port)))
-        self.r = redis.StrictRedis(host=host, port=int(port), db=options.redis_db)
+        self.r = connect_redis_string(options.redis, options.redis_db)
 
         self.topics = options.topics
 

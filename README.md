@@ -43,6 +43,7 @@ pypy listener.py --redis=server.path:6379 --write_every=1
 * invert topic->word hashes to be word->topic . This way each word string is only stored once in redis, at the cost of significantly more pipelining
 * massive amount of benchmarking
 * Support for sharded data files instead of single massive ones
+* Automatic database flushing to avoid incorporating bits of stale models
 
 ## BUGS
 * If individual processes die and restart, you'll get duplicate zombie words in the global state; fixing this would require some non trivial architectural work, and doesnt seem justified given the impact on the model.
