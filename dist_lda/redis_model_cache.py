@@ -21,7 +21,7 @@ class RedisLDAModelCache:
         self.r.set('alpha', options.alpha)
         self.r.set('beta', options.beta)
         self.r.set('document', options.document)
-        self.r.incrby('shards', 1)
+        self.r.incr('shards', 1)
 
         # Track the local model state
         self.topic_d = defaultdict(lambda: defaultdict(int))
