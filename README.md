@@ -1,7 +1,7 @@
 # dist_lda
 
 Lightweight python implementation of a distributed, collapsed gibbs sampler for
-LDA. Uses redis to coordinate multiple nodes.
+LDA. Uses redis to coordinate multiple nodes. Data is sharded by row.
 
 dist_lda uses a dirty transaction model where words might be missing from local
 counts and totals in order to improve performance at the expense of further
@@ -9,14 +9,12 @@ approximating the markov chain. I'm confident that there is a convergence
 proof, but its too large to fit in the margin of this README.
 
 ## Run
-1. First start your redis somewhere 
-
+1.  First start your redis somewhere 
 ```
 ./src/redis-server redis.conf
 ```
 
-2. Next 
-
+2.  Next start the model processing shards. These will divide up the input data into cores*shards pieces and divvy it out amongst all the cores.
 ```bash
 pypy dist_lda.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=0 --redis=server.path:6379 --sync_every=1
 pypy dist_lda.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=1 --redis=server.path:6379 --sync_every=1
