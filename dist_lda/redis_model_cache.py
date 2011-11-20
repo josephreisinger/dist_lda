@@ -1,4 +1,5 @@
 import redis
+from utils import timed
 from collections import defaultdict
 
 class RedisLDAModelCache:

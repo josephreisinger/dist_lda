@@ -1,5 +1,12 @@
+import sys
+import random
+from collections import defaultdict
+from math import log
+from itertools import izip
+from sampler import sample_lp_mult
 from redis_model_cache import RedisLDAModelCache
-from lda_utils import *
+from utils import timed, open_or_gz
+from document import Document
 
 class DistributedLDA:
     def __init__(self, options):
@@ -64,7 +71,7 @@ class DistributedLDA:
         if iterations == None:
             iterations = self.options.iterations
         for iter in range(iterations):
-            if iter % options.sync_every == 0:
+            if iter % self.options.sync_every == 0:
                 self.model.pull_global_state()
             self.do_iteration(iter)
             self.model.finalize_iteration(iter)
