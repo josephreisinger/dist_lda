@@ -20,6 +20,7 @@ except:
 R = redis.StrictRedis(host=host, port=int(port), db=options.redis_db)
 
 model= R.get('model')
+document= R.get('document')
 topics = int(R.get('topics'))
 alpha = float(R.get('alpha'))
 beta = float(R.get('beta'))

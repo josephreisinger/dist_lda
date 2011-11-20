@@ -5,7 +5,7 @@ LDA. Uses redis to coordinate multiple nodes. Data is sharded by row.
 
 dist_lda uses a dirty transaction model where words might be missing from local
 counts and totals in order to improve performance at the expense of further
-approximating the markov chain. I'm confident that there is a convergence
+approximating the markov chain. I'm confident that there is still a convergence
 proof, but its too large to fit in the margin of this README.
 
 ## Getting Started

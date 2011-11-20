@@ -8,15 +8,13 @@ from itertools import izip
 from redis_model_cache import RedisLDAModelCache
 from lda_utils import *
 
-# XXX: TODO: fix V 
-
 class DistributedLDA:
     def __init__(self, options):
         self.model = RedisLDAModelCache(options)
         self.topics = options.topics
         self.beta = options.beta
         self.alpha = options.alpha
-        self.V = 10000
+        self.V = options.vocab_size
         self.options = options
 
         # Record some stats on what's going on
@@ -114,7 +112,6 @@ if __name__ == '__main__':
     parser.add_argument("--redis_db", type=int, default=0, help="Which redis DB") 
     parser.add_argument("--redis", type=str, default="localhost:6379", help="Host for redis server") 
 
-    # XXX: this doesnt actually work yet
     parser.add_argument("--cores", type=int, default=1, help="Number of cores to use") 
 
     parser.add_argument("--topics", type=int, default=100, help="Number of topics to use") 
@@ -123,6 +120,7 @@ if __name__ == '__main__':
     parser.add_argument("--iterations", type=int, default=1000, help="Number of iterations")
 
     parser.add_argument("--document", type=str, required=True, help="File to load as document") 
+    parser.add_argument("--vocab_size", type=int, default=100000, help="Size of the document vocabulary") 
 
     parser.add_argument("--shards", type=int, default=1, help="Shard the document file into this many") 
     parser.add_argument("--this_shard", type=int, default=0, help="What shard number am I")
