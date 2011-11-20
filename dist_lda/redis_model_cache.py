@@ -151,21 +151,19 @@ class RedisLDAModelCache:
 
 def dump_model(R):
     import gzip
-    model= R.get('model')
-    document= R.get('document')
-    topics = int(R.get('topics'))
-    alpha = float(R.get('alpha'))
-    beta = float(R.get('beta'))
+    import json
 
-
-    d = {}
-    d['model'] = model
-    d['topics'] = topics
-    d['alpha'] = alpha
-    d['beta'] = beta
-    d['document'] = document
-    d['w'] = defaultdict(lambda: defaultdict(int))
-    d['d'] = defaultdict(lambda: defaultdict(int))
+    d = {
+        'model':      R.get('model'),
+        'document':   R.get('document'),
+        'shards':     int(R.get('shards')),
+        'iterations': int(R.get('iterations')),
+        'topics':     int(R.get('topics')),
+        'alpha':      float(R.get('alpha')),
+        'beta':       float(R.get('beta')),
+        'w':          defaultdict(lambda: defaultdict(int)),
+        'd':          defaultdict(lambda: defaultdict(int))
+        }
 
     doc_name = document.split('/')[-1]
 
