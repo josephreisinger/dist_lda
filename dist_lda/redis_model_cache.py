@@ -170,14 +170,14 @@ def dump_model(R):
 
     with gzip.open('MODEL_%s-%s-T%d-alpha%.3f-beta%.3f-effective_iter=%d.json.gz' % (d['model'], doc_name, d['topics'], d['alpha'], d['beta'], int(d['iterations'] / float(d['shards']))), 'w') as f:
         with transact(R) as pipe:
-            for z in range(topics):
+            for z in range(d['topics']):
                 pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
             for z, zz in enumerate(pipe.execute()):
                 for w,v in zz:
                     d['w'][z][w] = int(v)
 
             # get documents
-            for z in range(topics):
+            for z in range(d['topics']):
                 pipe.zrevrangebyscore(('d', z), float('inf'), 1, withscores=True)
             for z, zz in enumerate(pipe.execute()):
                 for doc,v in zz:
