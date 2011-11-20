@@ -10,11 +10,9 @@ proof, but its too large to fit in the margin of this README.
 
 ## Run
 1.  First start your redis somewhere 
-
     ./src/redis-server redis.conf
 
 2.  Next start the model processing shards. These will divide up the input data into cores*shards pieces and divvy it out amongst all the cores.
-
     pypy dist_lda.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=0 --redis=server.path:6379 --sync_every=1
     pypy dist_lda.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=1 --redis=server.path:6379 --sync_every=1
     pypy dist_lda.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=2 --redis=server.path:6379 --sync_every=1
