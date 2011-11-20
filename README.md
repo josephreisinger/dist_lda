@@ -8,6 +8,9 @@ counts and totals in order to improve performance at the expense of further
 approximating the markov chain. I'm confident that there is a convergence
 proof, but its too large to fit in the margin of this README.
 
+## Run
+1 First start your redis somewhere 
+    ./src/redis-server redis.conf
 
 ## TODO
 * Model dumping subscription service
@@ -24,6 +27,9 @@ proof, but its too large to fit in the margin of this README.
 * If individual processes die and restart, you'll get duplicate zombie words in the global state; fixing this would require significant re-architecting and would probably be too slow
 
 
+## CONTACT
+[Joseph Reisinger](http://www.cs.utexas.edu/~joeraii)
+@josephreisinger
 
 ## LICENSE
 
