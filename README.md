@@ -9,19 +9,19 @@ approximating the markov chain. I'm confident that there is a convergence
 proof, but its too large to fit in the margin of this README.
 
 
-## TODO:
--- Model dumping subscription service
--- Shard topics over multiple redis servers (redis_cluster?)
--- enumerate strings or otherwise low-bit hash to reduce mem footprint
--- invert topic->word hashes to be word->topic . This way each word string is only stored once in redis, at the cost of significantly more pipelining
--- massive amount of benchmarking
+## TODO
+* Model dumping subscription service
+* Shard topics over multiple redis servers (redis_cluster?)
+* enumerate strings or otherwise low-bit hash to reduce mem footprint
+* invert topic->word hashes to be word->topic . This way each word string is only stored once in redis, at the cost of significantly more pipelining
+* massive amount of benchmarking
 
-## PERF:
--- The current performance bottleneck seems to be the redis server, since a ton of information is being swapped around. Anecdotally I've found one master can coordinate up to ~20 model shards before performance starts to degrade. Current work is to distribute the model across multiple redii (say, hashed by topic).
+## PERF
+* The current performance bottleneck seems to be the redis server, since a ton of information is being swapped around. Anecdotally I've found one master can coordinate up to ~20 model shards before performance starts to degrade. Current work is to distribute the model across multiple redii (say, hashed by topic).
 
 
-## BUGS:
--- If individual processes die and restart, you'll get duplicate zombie words in the global state; fixing this would require significant re-architecting and would probably be too slow
+## BUGS
+* If individual processes die and restart, you'll get duplicate zombie words in the global state; fixing this would require significant re-architecting and would probably be too slow
 
 
 
