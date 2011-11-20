@@ -24,6 +24,8 @@ if __name__ == '__main__':
         if not iter:
             continue
 
+        iter = int(iter)
+
         if not current_iter or (iter - current_iter) >= shards:
             current_iter = iter
             dump_model(R)
