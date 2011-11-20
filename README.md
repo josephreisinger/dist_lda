@@ -3,10 +3,9 @@
 Lightweight python implementation of a distributed, collapsed gibbs sampler for
 LDA. Uses redis to coordinate multiple nodes. Data is sharded by row.
 
-dist_lda uses a dirty transaction model where words might be missing from local
-counts and totals in order to improve performance at the expense of further
-approximating the markov chain. I'm confident that there is still a convergence
-proof, but its too large to fit in the margin of this README.
+dist_lda uses a dirty transaction model where each shard's view of the global
+state might lag behind the actual global state. This is essentially the model
+of Newman et al "Distributed Inference for Latent Dirichlet Allocation"
 
 ## Getting Started
 First start your redis somewhere 

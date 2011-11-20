@@ -22,5 +22,5 @@ def connect_redis_string(s, db):
     except:
         host = s
         port = 6379
-    sys.stderr.write('connecting to host %s:%d\n' % (host, int(port)))
+    sys.stderr.write('connecting to redis at %s:%d\n' % (host, int(port)))
     return redis.StrictRedis(host=host, port=int(port), db=db)
