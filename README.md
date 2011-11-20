@@ -10,10 +10,13 @@ proof, but its too large to fit in the margin of this README.
 
 ## Run
 1. First start your redis somewhere 
+
 ```
 ./src/redis-server redis.conf
 ```
+
 2. Next 
+
 ```
 ./pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=0 --redis=redis.server.path:6379 --sync_every=1
 ./pypy dist_lda.py --topics=100 --document=fancy_data.gz --cores=2 --shards=4 --this_shard=1 --redis=redis.server.path:6379 --sync_every=1
