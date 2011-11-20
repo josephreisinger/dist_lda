@@ -5,7 +5,7 @@ LDA. Uses redis to coordinate multiple nodes. Data is sharded by row.
 
 dist_lda uses a dirty transaction model where each shard's view of the global
 state might lag behind the actual global state. This is essentially the model
-of Newman et al "Distributed Inference for Latent Dirichlet Allocation"
+of Newman et al "[Distributed Inference for Latent Dirichlet Allocation](http://www.jmlr.org/papers/volume10/newman09a/newman09a.pdf)"
 
 ## Getting Started
 First start your redis somewhere 
