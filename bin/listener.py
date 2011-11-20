@@ -20,6 +20,10 @@ if __name__ == '__main__':
         shards = R.get('shards')
         iter = R.get('iterations')
 
+        # Guard against nothing having completed even a single iteration
+        if not iter:
+            continue
+
         if not current_iter or (iter - current_iter) >= shards:
             current_iter = iter
             dump_model(R)
