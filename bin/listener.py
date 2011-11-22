@@ -27,7 +27,7 @@ if __name__ == '__main__':
         iter = int(iter)
         shards = int(shards)
 
-        if not current_iter or (iter - current_iter) >= shards:
+        if not current_iter or (iter - current_iter) >= options.write_every*shards:
             current_iter = iter
             dump_model(R)
 
