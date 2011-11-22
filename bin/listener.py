@@ -25,6 +25,7 @@ if __name__ == '__main__':
             continue
 
         iter = int(iter)
+        shards = int(shards)
 
         if not current_iter or (iter - current_iter) >= shards:
             current_iter = iter

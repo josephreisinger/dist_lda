@@ -22,6 +22,7 @@ class RedisLDAModelCache:
         self.r.set('alpha', options.alpha)
         self.r.set('beta', options.beta)
         self.r.set('document', options.document)
+        self.r.set('vocab', options.vocab_size)
         self.r.incr('shards', 1)
 
         # Track the local model state
@@ -157,6 +158,7 @@ def dump_model(R):
     d = {
         'model':      R.get('model'),
         'document':   R.get('document'),
+        'vocab_size': R.get('vocab_size'),
         'shards':     int(R.get('shards')),
         'iterations': int(R.get('iterations')),
         'topics':     int(R.get('topics')),
