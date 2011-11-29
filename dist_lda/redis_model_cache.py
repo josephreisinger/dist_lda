@@ -1,6 +1,5 @@
-import redis
 import heapq
-from redis_utils import connect_redis_string, transact, execute
+from redis_utils import connect_redis_list, transact, execute
 from utils import timed
 from collections import defaultdict
 
@@ -12,18 +11,19 @@ class RedisLDAModelCache:
     Currently this holds the entire local model state and can do the sync.
     """
     def __init__(self, options):
-        self.r = connect_redis_string(options.redis, options.redis_db)
+        self.rs = connect_redis_list(options.redis_hosts, options.redis_db)
 
         self.topics = options.topics
 
         # Store some metadata
-        self.r.set('model', 'lda')
-        self.r.set('topics', options.topics)
-        self.r.set('alpha', options.alpha)
-        self.r.set('beta', options.beta)
-        self.r.set('document', options.document)
-        self.r.set('vocab', options.vocab_size)
-        self.r.incr('shards', 1)
+        for r in self.rs:
+            r.set('model', 'lda')
+            r.set('topics', options.topics)
+            r.set('alpha', options.alpha)
+            r.set('beta', options.beta)
+            r.set('document', options.document)
+            r.set('vocab', options.vocab_size)
+            r.incr('shards', 1)
 
         # Track the local model state
         self.topic_d = defaultdict(lambda: defaultdict(int))
@@ -39,30 +39,33 @@ class RedisLDAModelCache:
 
         self.resample_count = 0
 
+    def redis_of(self, thing):
+        return hash(thing) % len(self.rs)
+
     @timed
     def push_local_state(self):
         """
         Push our current set of deltas to the server
         """
         # sys.stderr.write('Push local state...\n')
-        with execute(self.r) as pipe:
+        with execute(self.rs) as pipes:
             # Update document state from deltas
             for z,v in self.delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
                     if self.topic_d[z][d] == 0:  # This works because we're document sharding
-                        pipe.zrem(('d', z), d)
+                        pipes[self.redis_of(d)].zrem(('d', z), d)
                     else:
-                        pipe.zincrby(('d', z), d, delta)
+                        pipes[self.redis_of(d)].zincrby(('d', z), d, delta)
 
             # Update topic state
             for z,v in self.delta_topic_w.iteritems():
                 for w, delta in v.iteritems():
                     if delta != 0:
-                        pipe.zincrby(('w', z), w, delta)
+                        pipes[self.redis_of(w)].zincrby(('w', z), w, delta)
             # Update sums
             for z, delta in self.delta_topic_wsum.iteritems():
                 if delta != 0:
-                    pipe.hincrby('wsum', z, delta)
+                    pipes[self.redis_of(z)].hincrby('wsum', z, delta)
 
 
         # Reset the deltas
@@ -81,22 +84,21 @@ class RedisLDAModelCache:
         self.topic_wsum = defaultdict(int)
 
         # Pull down the global state
-        with transact(self.r) as pipe:
-            # test using remrangebyscore(0,0) and then revrangebyscore(-inf, inf)
-            for z in range(self.topics):
-                pipe.zremrangebyscore(('w', z), 0, 0).execute()
-            # Also count that we're not losing any data
-            for z in range(self.topics):
-                # This is clever because it avoids sending the zeros over the wire
-                pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
-            for z, zz in enumerate(pipe.execute()):
-                self.topic_w[z] = defaultdict(int)
-                for w,v in zz:
-                    v = int(v)
-                    assert v > 0
-                    self.topic_w[z][w] = v
+        with transact(self.rs) as pipes:
+            # Remove everything with zero count to save memory
+            for pipe in pipes:
+                for z in range(self.topics):
+                    pipe.zremrangebyscore(('w', z), 0, 0).execute()
+                for z in range(self.topics):
+                    # This is clever because it avoids sending the zeros over the wire
+                    pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
+                for z, zz in enumerate(pipe.execute()):
+                    for w,v in zz:
+                        v = int(v)
+                        assert v > 0
+                        self.topic_w[z][w] = v
 
-            self.topic_wsum = defaultdict(int, {int(k):int(v) for k,v in pipe.hgetall('wsum').execute()[0].iteritems()})
+                self.topic_wsum.update(pipe.hgetall('wsum').execute()[0])
 
     
     @staticmethod
@@ -148,22 +150,23 @@ class RedisLDAModelCache:
             d.assignment[i] = newz
 
     def finalize_iteration(self, iter):
-        self.r.incr('iterations')
+        for r in self.rs:
+            r.incr('iterations')
 
 
-def dump_model(R):
+def dump_model(rs):
     import gzip
     import json
 
     d = {
-        'model':      R.get('model'),
-        'document':   R.get('document'),
-        'vocab_size': R.get('vocab_size'),
-        'shards':     int(R.get('shards')),
-        'iterations': int(R.get('iterations')),
-        'topics':     int(R.get('topics')),
-        'alpha':      float(R.get('alpha')),
-        'beta':       float(R.get('beta')),
+        'model':      rs[0].get('model'),
+        'document':   rs[0].get('document'),
+        'vocab_size': rs[0].get('vocab_size'),
+        'shards':     int(rs[0].get('shards')),
+        'iterations': int(rs[0].get('iterations')),
+        'topics':     int(rs[0].get('topics')),
+        'alpha':      float(rs[0].get('alpha')),
+        'beta':       float(rs[0].get('beta')),
         'w':          defaultdict(lambda: defaultdict(int)),
         'd':          defaultdict(lambda: defaultdict(int))
         }
@@ -171,19 +174,24 @@ def dump_model(R):
     doc_name = d['document'].split('/')[-1]
 
     with gzip.open('MODEL_%s-%s-T%d-alpha%.3f-beta%.3f-effective_iter=%d.json.gz' % (d['model'], doc_name, d['topics'], d['alpha'], d['beta'], int(d['iterations'] / float(d['shards']))), 'w') as f:
-        with transact(R) as pipe:
-            for z in range(d['topics']):
-                pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
-            for z, zz in enumerate(pipe.execute()):
-                for w,v in zz:
-                    d['w'][z][w] = int(v)
-
-            # get documents
-            for z in range(d['topics']):
-                pipe.zrevrangebyscore(('d', z), float('inf'), 1, withscores=True)
-            for z, zz in enumerate(pipe.execute()):
-                for doc,v in zz:
-                    d['d'][z][doc] = int(v)
+        with transact(rs) as pipes:
+            for pipe in pipes:
+                for z in range(d['topics']):
+                    # This is clever because it avoids sending the zeros over the wire
+                    pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
+                # get words
+                for z, zz in enumerate(pipe.execute()):
+                    for w,v in zz:
+                        v = int(v)
+                        assert v > 0
+                        d['w'][z][w] = v
+                # get documents
+                for z in range(d['topics']):
+                    pipe.zrevrangebyscore(('d', z), float('inf'), 1, withscores=True)
+                for z, zz in enumerate(pipe.execute()):
+                    for doc,v in zz:
+                        d['d'][z][doc] = int(v)
 
 
         f.write(json.dumps(d))
+

@@ -3,24 +3,27 @@ import sys
 from contextlib import contextmanager
 
 @contextmanager
-def transact(r):
-    pipe = r.pipeline()
-    yield pipe
+def transact(rs):
+    yield [r.pipeline() for r in rs]
 
 @contextmanager
-def execute(r, transaction=True):
-    pipe = r.pipeline(transaction=transaction)
-    yield pipe
-    pipe.execute()
+def execute(rs, transaction=True):
+    pipes = [r.pipeline(transaction=transaction) for r in rs]
+    yield pipes
+    [pipe.execute() for pipe in pipes]
 
 
 
-def connect_redis_string(s, db):
+def connect_redis_list(redises, db):
+    redises = redises.split(',')
     # Get redis host and port
-    try:
-        host, port = s.split(':')
-    except:
-        host = s
-        port = 6379
-    sys.stderr.write('connecting to redis at %s:%d\n' % (host, int(port)))
-    return redis.StrictRedis(host=host, port=int(port), db=db)
+    connections = []
+    for r in redises:
+        try:
+            host, port = r.split(':')
+        except:
+            host = r
+            port = 6379
+        sys.stderr.write('connecting to redis at %s:%d\n' % (host, int(port)))
+        connections.append(redis.StrictRedis(host=host, port=int(port), db=db))
+    return connections

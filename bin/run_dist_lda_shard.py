@@ -7,7 +7,7 @@ if __name__ == '__main__':
  
     parser = ArgumentParser() 
     parser.add_argument("--redis_db", type=int, default=0, help="Which redis DB") 
-    parser.add_argument("--redis", type=str, default="localhost:6379", help="Host for redis server") 
+    parser.add_argument("--redis_hosts", type=str, default="localhost:6379", help="List of redises hosts for holding the model state") 
 
     parser.add_argument("--cores", type=int, default=1, help="Number of cores to use") 
 
@@ -33,6 +33,7 @@ if __name__ == '__main__':
     sys.stderr.write("XXX: currently assuming unique docnames\n")
 
     options.shards = options.cores * options.shards # split up even more
+
 
     def run_local_shard(core_id):
         # The basic idea here is the multiply the number of shards by the number of cores and
