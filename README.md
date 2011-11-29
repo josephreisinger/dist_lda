@@ -17,10 +17,10 @@ First start your redis somewhere
 Next start the model processing shards. These will divide up the input data into cores*shards pieces and divvy it out amongst all the cores.
 
 ```
-pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=0 --redis=host:6379 --sync_every=1
-pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=1 --redis=host:6379 --sync_every=1
-pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=2 --redis=host:6379 --sync_every=1
-pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=3 --redis=host:6379 --sync_every=1
+pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=0 --redis_hosts=host:6379 --sync_every=1
+pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=1 --redis_hosts=host:6379 --sync_every=1
+pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=2 --redis_hosts=host:6379 --sync_every=1
+pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=3 --redis_hosts=host:6379 --sync_every=1
 ```
 
 (I recommend pypy because currently its faster than python, and I'm not using numpy libraries)
@@ -35,12 +35,12 @@ This will generate a gzipped json representation of the model.
 
 ## Performance
 * The current performance bottleneck seems to be the redis server, since a ton of information is being swapped around. Anecdotally I've found one master can coordinate up to ~20 model shards before performance starts to degrade. Current work is to distribute the model across multiple redii (say, hashed by topic).
+* Redis memory bottlenecks can be alleviated by sharding over multiple redis servers
 
 
 ## Future Work
-* Shard topics over multiple redis servers (redis_cluster?)
 * enumerate strings or otherwise low-bit hash to reduce mem footprint
-* invert topic->word hashes to be word->topic . This way each word string is only stored once in redis, at the cost of significantly more pipelining
+* maybe invert topic->word hashes to be word->topic . This way each word string is only stored once in redis, at the cost of significantly more pipelining
 * massive amount of benchmarking
 * Support for sharded data files instead of single massive ones
 * Automatic database flushing to avoid incorporating bits of stale models
