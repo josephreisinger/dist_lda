@@ -71,7 +71,8 @@ class DistributedLDA:
         if iterations == None:
             iterations = self.options.iterations
         for iter in range(iterations):
-            if iter % self.options.sync_every == 0:
+            # Add shard to iter in order to stagger synchronization (alternatively sync randomly?)
+            if (iter + self.options.this_shard) % self.options.sync_every == 0:
                 self.model.pull_global_state()
             self.do_iteration(iter)
             self.model.finalize_iteration(iter)

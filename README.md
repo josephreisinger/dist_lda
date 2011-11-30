@@ -1,7 +1,10 @@
 # dist_lda
 
 Lightweight python implementation of a distributed, collapsed gibbs sampler for
-LDA. Uses redis to coordinate multiple nodes. Data is sharded by row.
+LDA. Uses redis to coordinate multiple nodes. 
+
+Documents and associated z-assignments are sharded across worker nodes (row sharding).
+Model word/document counts are sharded across redis nodes by vocab (column sharding).
 
 dist_lda uses a dirty transaction model where each shard's view of the global
 state might lag behind the actual global state. This is essentially the model
@@ -33,17 +36,24 @@ pypy listener.py --redis=server.path:6379 --write_every=1
 
 This will generate a gzipped json representation of the model.
 
+Note that you can pass multiple redis databases separating by comma, e.g.:
+
+```
+--redis_hosts=tygra:6379,panthro:6379,lion-o:6379
+```
+
 ## Performance
-* The current performance bottleneck seems to be the redis server, since a ton of information is being swapped around. Anecdotally I've found one master can coordinate up to ~20 model shards before performance starts to degrade. Current work is to distribute the model across multiple redii (say, hashed by topic).
-* Redis memory bottlenecks can be alleviated by sharding over multiple redis servers
+* Performance bottleneck is communication. The ratio of worker shard updates to redis shards is critical, since there is a large amount of data transfer. Anecdotally I've found one master can coordinate up to ~20 model shards each with a few hundred MB of data before performance starts to degrade.
+* Redis memory bottlenecks can be alleviated somewhat by sharding the model over multiple redis servers, lowering the number of worker shards, or lowering the rate of synchronization (say, once per 10 gibbs steps).
 
 
 ## Future Work
+* Unblock / pipeline execute() statements; make them thread parallel.
 * enumerate strings or otherwise low-bit hash to reduce mem footprint
-* maybe invert topic->word hashes to be word->topic . This way each word string is only stored once in redis, at the cost of significantly more pipelining
 * massive amount of benchmarking
 * Support for sharded data files instead of single massive ones
 * Automatic database flushing to avoid incorporating bits of stale models
+* ROBUSTNESS / failure detection.
 * Support for inference (duh)
 
 ## BUGS
