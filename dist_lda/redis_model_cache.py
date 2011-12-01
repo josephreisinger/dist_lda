@@ -1,7 +1,8 @@
 import heapq
-from redis_utils import connect_redis_list, transact, execute
+from redis_utils import connect_redis_list, transact_block, transact_single, execute_block, execute_single
 from utils import timed
 from collections import defaultdict
+
 
 class RedisLDAModelCache:
     """
@@ -48,7 +49,7 @@ class RedisLDAModelCache:
         Push our current set of deltas to the server
         """
         # sys.stderr.write('Push local state...\n')
-        with execute(self.rs) as pipes:
+        with execute_block(self.rs, transaction=False) as pipes:
             # Update document state from deltas
             for z,v in self.delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
@@ -83,12 +84,19 @@ class RedisLDAModelCache:
         self.topic_w = defaultdict(lambda: defaultdict(int))
         self.topic_wsum = defaultdict(int)
 
-        # Pull down the global state
-        with transact(self.rs) as pipes:
+        # Split up these two transactions for more fine-grained parallelism
+        # First prune zero score hash keys
+        with execute_block(self.rs, transaction=False) as pipes:
             # Remove everything with zero count to save memory
             for pipe in pipes:
                 for z in range(self.topics):
-                    pipe.zremrangebyscore(('w', z), 0, 0).execute()
+                    pipe.zremrangebyscore(('w', z), 0, 0)
+
+        # TODO: this part can be pipelined as well
+        # Pull down the global state
+        with transact_block(self.rs) as pipes:
+            # Remove everything with zero count to save memory
+            for pipe in pipes:
                 for z in range(self.topics):
                     # This is clever because it avoids sending the zeros over the wire
                     pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
@@ -174,7 +182,7 @@ def dump_model(rs):
     doc_name = d['document'].split('/')[-1]
 
     with gzip.open('MODEL_%s-%s-T%d-alpha%.3f-beta%.3f-effective_iter=%d.json.gz' % (d['model'], doc_name, d['topics'], d['alpha'], d['beta'], int(d['iterations'] / float(d['shards']))), 'w') as f:
-        with transact(rs) as pipes:
+        with transact_block(rs) as pipes:
             for pipe in pipes:
                 for z in range(d['topics']):
                     # This is clever because it avoids sending the zeros over the wire
