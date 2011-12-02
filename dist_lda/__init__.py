@@ -1,3 +1,4 @@
+import pyximport; pyximport.install()
 from document import *
 from sampler import *
 from redis_utils import *
