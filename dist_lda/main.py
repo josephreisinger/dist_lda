@@ -14,13 +14,11 @@ class DistributedLDA:
         self.topics = options.topics
         self.beta = options.beta
         self.alpha = options.alpha
-        self.V = options.vocab_size
         self.options = options
 
         # Record some stats on what's going on
         self.swaps = 0
         self.attempts = 0
-
 
     def insert_new_document(self, d):
         # sys.stderr.write('Inserting [%s]\n' % d.name)
@@ -40,9 +38,11 @@ class DistributedLDA:
         td   = defaultdict(float)
         m = self.model
         for tz in range(self.topics):
-            if m.topic_wsum[tz] > 0 and m.topic_d[tz][intern(d.name)] > 0:
-                tdm1[tz] = -log(self.beta*self.V + m.topic_wsum[tz] - 1) + log(self.alpha + m.topic_d[tz][intern(d.name)] - 1) - dndm1
-            td[tz]   = -log(self.beta*self.V + m.topic_wsum[tz]) + log(self.alpha + (m.topic_d[tz][intern(d.name)])) - dnd
+            assert m.topic_wsum[tz] >= 0
+            if m.topic_wsum[tz] > 0 and m.topic_d[tz][d.id] > 0:
+                tdm1[tz] = -log(self.beta*m.v.size() + m.topic_wsum[tz] - 1) + log(self.alpha + m.topic_d[tz][d.id] - 1) - dndm1
+            
+            td[tz] = -log(self.beta*m.v.size() + m.topic_wsum[tz]) + log(self.alpha + (m.topic_d[tz][d.id])) - dnd
 
         return tdm1, td
 
@@ -94,8 +94,9 @@ class DistributedLDA:
         sys.stderr.write('Loading document shard %d / %d...\n' % (self.options.this_shard, self.options.shards))
         processed = 0
         for line_no, line in enumerate(open_or_gz(self.options.document)):
+            # Process every line because we need to build the vocabulary
+            d = Document(line=line, vocab=self.model.v)
             if line_no % self.options.shards == self.options.this_shard:
-                d = Document(line=line)
                 self.insert_new_document(d)
                 self.resample_document(d)
                 processed += 1

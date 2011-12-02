@@ -17,7 +17,6 @@ if __name__ == '__main__':
     parser.add_argument("--iterations", type=int, default=1000, help="Number of iterations")
 
     parser.add_argument("--document", type=str, required=True, help="File to load as document") 
-    parser.add_argument("--vocab_size", type=int, default=100000, help="Size of the document vocabulary") 
 
     parser.add_argument("--shards", type=int, default=1, help="Shard the document file into this many") 
     parser.add_argument("--this_shard", type=int, default=0, help="What shard number am I")

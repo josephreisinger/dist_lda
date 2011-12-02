@@ -49,7 +49,7 @@ Note that you can pass multiple redis databases separating by comma, e.g.:
 
 ## Future Work
 * Unblock / pipeline execute() statements; make them thread parallel.
-* enumerate strings or otherwise low-bit hash to reduce mem footprint
+* low-bit hash trick to reduce mem footprint
 * massive amount of benchmarking
 * Support for sharded data files instead of single massive ones
 * Automatic database flushing to avoid incorporating bits of stale models

@@ -2,6 +2,7 @@ import heapq
 from redis_utils import connect_redis_list, transact_block, transact_single, execute_block, execute_single
 from utils import timed
 from collections import defaultdict
+from document import Vocabulary
 
 
 class RedisLDAModelCache:
@@ -23,7 +24,6 @@ class RedisLDAModelCache:
             r.set('alpha', options.alpha)
             r.set('beta', options.beta)
             r.set('document', options.document)
-            r.set('vocab', options.vocab_size)
             r.incr('shards', 1)
 
         # Track the local model state
@@ -37,6 +37,8 @@ class RedisLDAModelCache:
         self.delta_topic_wsum = defaultdict(int)
 
         self.documents = []
+        self.v = Vocabulary()
+
 
         self.resample_count = 0
 
@@ -102,21 +104,19 @@ class RedisLDAModelCache:
                     pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
                 for z, zz in enumerate(pipe.execute()):
                     for w,v in zz:
-                        v = int(v)
-                        assert v > 0
-                        self.topic_w[z][w] = v
+                        self.topic_w[z][int(w)] = int(v)
 
-                self.topic_wsum.update(pipe.hgetall('wsum').execute()[0])
+                for z,c in pipe.hgetall('wsum').execute()[0].iteritems():
+                    self.topic_wsum[int(z)] = int(c)
 
     
-    @staticmethod
-    def topic_to_string(topic, max_length=20):
+    def topic_to_string(self, topic, max_length=20):
         result = []
         for w,c in topic.iteritems():
             if len(result) > max_length:
-                heapq.heappushpop(result, (c,w))
+                heapq.heappushpop(result, (c,self.v.rev(w)))
             else:
-                heapq.heappush(result, (c,w))
+                heapq.heappush(result, (c,self.v.rev(w)))
         return heapq.nlargest(max_length, result)
 
 
@@ -126,12 +126,12 @@ class RedisLDAModelCache:
         """
         d.assignment.append(z)
 
-        self.topic_d[z][intern(d.name)] += 1
-        self.topic_w[z][intern(w)] += 1
+        self.topic_d[z][d.id] += 1
+        self.topic_w[z][w] += 1
         self.topic_wsum[z] += 1
 
-        self.delta_topic_d[z][intern(d.name)] += 1
-        self.delta_topic_w[z][intern(w)] += 1
+        self.delta_topic_d[z][d.id] += 1
+        self.delta_topic_w[z][w] += 1
         self.delta_topic_wsum[z] += 1
 
     def move_d_w(self, w, d, i, oldz, newz):
@@ -139,25 +139,32 @@ class RedisLDAModelCache:
         Move w from oldz to newz
         """
         if newz != oldz:
-            self.topic_d[oldz][intern(d.name)] += -1
-            self.topic_w[oldz][intern(w)] += -1
+            self.topic_d[oldz][d.id] += -1
+            self.topic_w[oldz][w] += -1
             self.topic_wsum[oldz] += -1
+            assert self.topic_d[oldz][d.id] >= 0
+            assert self.topic_w[oldz][w] >= 0
+            assert self.topic_wsum[oldz] >= 0
 
-            self.delta_topic_d[oldz][intern(d.name)] += -1
-            self.delta_topic_w[oldz][intern(w)] += -1
+            self.delta_topic_d[oldz][d.id] += -1
+            self.delta_topic_w[oldz][w] += -1
             self.delta_topic_wsum[oldz] += -1
 
-            self.topic_d[newz][intern(d.name)] += 1
-            self.topic_w[newz][intern(w)] += 1
+            self.topic_d[newz][d.id] += 1
+            self.topic_w[newz][w] += 1
             self.topic_wsum[newz] += 1
 
-            self.delta_topic_d[newz][intern(d.name)] += 1
-            self.delta_topic_w[newz][intern(w)] += 1
+            self.delta_topic_d[newz][d.id] += 1
+            self.delta_topic_w[newz][w] += 1
             self.delta_topic_wsum[newz] += 1
 
             d.assignment[i] = newz
 
     def finalize_iteration(self, iter):
+        if iter == 0:
+            with execute_single(self.rs[0], transaction=False) as pipe:
+                for w,id in self.v.to_id.iteritems():
+                    pipe.hset('lookup', id, w)
         for r in self.rs:
             r.incr('iterations')
 
@@ -169,12 +176,12 @@ def dump_model(rs):
     d = {
         'model':      rs[0].get('model'),
         'document':   rs[0].get('document'),
-        'vocab_size': rs[0].get('vocab_size'),
         'shards':     int(rs[0].get('shards')),
         'iterations': int(rs[0].get('iterations')),
         'topics':     int(rs[0].get('topics')),
         'alpha':      float(rs[0].get('alpha')),
         'beta':       float(rs[0].get('beta')),
+        'lookup':     rs[0].hgetall('lookup'),
         'w':          defaultdict(lambda: defaultdict(int)),
         'd':          defaultdict(lambda: defaultdict(int))
         }
