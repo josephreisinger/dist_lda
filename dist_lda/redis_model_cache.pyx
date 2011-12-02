@@ -45,7 +45,7 @@ class RedisLDAModelCache:
     def redis_of(self, thing):
         return hash(thing) % len(self.rs)
 
-    @timed
+    @timed("push_local_state")
     def push_local_state(self):
         """
         Push our current set of deltas to the server
@@ -76,7 +76,7 @@ class RedisLDAModelCache:
         self.delta_topic_w = defaultdict(lambda: defaultdict(int))
         self.delta_topic_wsum = defaultdict(int)
 
-    @timed
+    @timed("pull_global_state")
     def pull_global_state(self):
         # Note we don't need to pull the d state, since our shard is 100% responsible for it
 

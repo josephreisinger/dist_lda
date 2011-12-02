@@ -79,7 +79,7 @@ class DistributedLDA:
             self.model.finalize_iteration(iter)
         return self
 
-    @timed
+    @timed("do_iteration")
     def do_iteration(self, iter):
         self.swaps, self.attempts = 0, 0
         for d in self.model.documents:
@@ -89,7 +89,7 @@ class DistributedLDA:
             sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.model.topic_to_string(self.model.topic_w[z])])))
         sys.stderr.write('|| DONE core=%d iter=%d (%d swaps %.4f%%)\n' % (self.options.core_id, iter, self.swaps, 100 * self.swaps / float(self.attempts)))
 
-    @timed
+    @timed("load_initial_docs")
     def load_initial_docs(self):
         sys.stderr.write('Loading document shard %d / %d...\n' % (self.options.this_shard, self.options.shards))
         processed = 0
