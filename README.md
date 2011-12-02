@@ -20,18 +20,16 @@ First start your redis somewhere
 Next start the model processing shards. These will divide up the input data into cores*shards pieces and divvy it out amongst all the cores.
 
 ```
-pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=0 --redis_hosts=host:6379 --sync_every=1
-pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=1 --redis_hosts=host:6379 --sync_every=1
-pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=2 --redis_hosts=host:6379 --sync_every=1
-pypy bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=3 --redis_hosts=host:6379 --sync_every=1
+python bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=0 --redis_hosts=host:6379 --sync_every=1
+python bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=1 --redis_hosts=host:6379 --sync_every=1
+python bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=2 --redis_hosts=host:6379 --sync_every=1
+python bin/run_dist_lda_shard.py --topics=100 --document=data.gz --cores=2 --shards=4 --this_shard=3 --redis_hosts=host:6379 --sync_every=1
 ```
-
-(I recommend pypy because currently its faster than python, and I'm not using numpy libraries)
 
 Finally, optionally start up a listener to dump the model to disk every so often:
 
 ```
-pypy listener.py --redis=server.path:6379 --write_every=1
+python listener.py --redis=server.path:6379 --write_every=1
 ```
 
 This will generate a gzipped json representation of the model.
@@ -43,6 +41,7 @@ Note that you can pass multiple redis databases separating by comma, e.g.:
 ```
 
 ## Performance
+* Make sure you have the hiredis package installed; this will significantly reduce message parsing time.
 * Performance bottleneck is communication. The ratio of worker shard updates to redis shards is critical, since there is a large amount of data transfer. Anecdotally I've found one master can coordinate up to ~20 model shards each with a few hundred MB of data before performance starts to degrade.
 * Redis memory bottlenecks can be alleviated somewhat by sharding the model over multiple redis servers, lowering the number of worker shards, or lowering the rate of synchronization (say, once per 10 gibbs steps).
 
