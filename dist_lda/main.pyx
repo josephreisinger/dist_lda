@@ -19,6 +19,7 @@ class DistributedLDA:
         # Record some stats on what's going on
         self.swaps = 0
         self.attempts = 0
+        self.syncs = 0
 
     def insert_new_document(self, d):
         # sys.stderr.write('Inserting [%s]\n' % d.name)
@@ -75,6 +76,7 @@ class DistributedLDA:
             # if (iter + self.options.this_shard) % self.options.sync_every == 0:
             if random.random() < 1.0 / float(self.options.sync_every):
                 self.model.pull_global_state()
+                self.syncs += 1
             self.do_iteration(iter)
             self.model.finalize_iteration(iter)
         return self
@@ -87,7 +89,7 @@ class DistributedLDA:
         # Print out the topics
         for z in range(self.topics):
             sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.model.topic_to_string(self.model.topic_w[z])])))
-        sys.stderr.write('|| DONE core=%d iter=%d (%d swaps %.4f%%)\n' % (self.options.core_id, iter, self.swaps, 100 * self.swaps / float(self.attempts)))
+        sys.stderr.write('|| DONE core=%d iter=%d syncs=%d (%d swaps %.4f%%)\n' % (self.options.core_id, iter, self.syncs, self.swaps, 100 * self.swaps / float(self.attempts)))
 
     @timed("load_initial_docs")
     def load_initial_docs(self):

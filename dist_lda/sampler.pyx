@@ -1,7 +1,7 @@
 import random
 from math import exp, log
 
-def addLog(x, y):
+cdef inline double addLog(double x, double y):
     if x == 0:
         return y
     elif y == 0:
