@@ -19,7 +19,7 @@ class DistributedLDA:
         # Record some stats on what's going on
         self.swaps = 0
         self.attempts = 0
-        self.syncs = 0
+        self.resamples = 0
 
     def insert_new_document(self, d):
         # sys.stderr.write('Inserting [%s]\n' % d.name)
@@ -49,34 +49,31 @@ class DistributedLDA:
 
     # @timed
     def resample_document(self, d):
-        tdm1, td = self.cache_params(d)
         m = self.model
-        for i, (w,oldz) in enumerate(izip(d.dense, d.assignment)):
-            lp = []
-            for tz in range(self.topics):
-                if tz == oldz:
-                    assert type(tz) == type(oldz)
-                    assert m.topic_w[tz][w] > 0
-                    lp.append(log(self.beta + m.topic_w[tz][w] - 1) + tdm1[tz])
-                else:
-                    lp.append(log(self.beta + m.topic_w[tz][w]) + td[tz])
 
-            newz = sample_lp_mult(lp)
-            self.model.move_d_w(w, d, i, oldz, newz)
+        with m.topic_lock:
+            tdm1, td = self.cache_params(d)
+            for i, (w,oldz) in enumerate(izip(d.dense, d.assignment)):
+                lp = []
+                for tz in range(self.topics):
+                    if tz == oldz:
+                        assert type(tz) == type(oldz)
+                        assert m.topic_w[tz][w] > 0
+                        lp.append(log(self.beta + m.topic_w[tz][w] - 1) + tdm1[tz])
+                    else:
+                        lp.append(log(self.beta + m.topic_w[tz][w]) + td[tz])
 
-            self.attempts += 1
-            if newz != oldz:
-                self.swaps += 1
+                newz = sample_lp_mult(lp)
+                self.model.move_d_w(w, d, i, oldz, newz)
+
+                self.attempts += 1
+                if newz != oldz:
+                    self.swaps += 1
 
     def iterate(self, iterations=None):
         if iterations == None:
             iterations = self.options.iterations
         for iter in range(iterations):
-            # Add shard to iter in order to stagger synchronization (alternatively sync randomly?)
-            # if (iter + self.options.this_shard) % self.options.sync_every == 0:
-            if random.random() < 1.0 / float(self.options.sync_every):
-                self.model.pull_global_state()
-                self.syncs += 1
             self.do_iteration(iter)
             self.model.finalize_iteration(iter)
         return self
@@ -89,7 +86,8 @@ class DistributedLDA:
         # Print out the topics
         for z in range(self.topics):
             sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.model.topic_to_string(self.model.topic_w[z])])))
-        sys.stderr.write('|| DONE core=%d iter=%d syncs=%d (%d swaps %.4f%%)\n' % (self.options.core_id, iter, self.syncs, self.swaps, 100 * self.swaps / float(self.attempts)))
+        self.resamples += 1 
+        sys.stderr.write('|| DONE core=%d iter=%d resamples=%d pulls=%d pushes=%d (%d swaps %.4f%%)\n' % (self.options.core_id, iter, self.resamples, self.model.pulls, self.model.pushes, self.swaps, 100 * self.swaps / float(self.attempts)))
 
     @timed("load_initial_docs")
     def load_initial_docs(self):

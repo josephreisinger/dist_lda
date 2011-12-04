@@ -21,10 +21,6 @@ if __name__ == '__main__':
     parser.add_argument("--shards", type=int, default=1, help="Shard the document file into this many") 
     parser.add_argument("--this_shard", type=int, default=0, help="What shard number am I")
 
-    # Resync intervals
-    parser.add_argument("--sync_every", type=int, default=1, help="How many iterations should we wait to sync?")
-    # Currently pull is every iteration 
-
     options = parser.parse_args(sys.argv[1:]) 
 
     sys.stderr.write('Running on %d cores\n' % options.cores)

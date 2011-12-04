@@ -16,7 +16,7 @@ cdef inline double addLog(double x, double y):
         return y + log(1 + exp(x-y))
 
 
-def sample_lp_mult(lp):
+def sample_lp_mult(list lp):
     cut = random.random()
 
     s = 0
