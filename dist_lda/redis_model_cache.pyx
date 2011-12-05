@@ -54,12 +54,12 @@ class RedisLDAModelCache:
 
         # Start threads for pull and push
         self.pull_thread_ref = threading.Thread(name="pull_thread", target=self.pull_thread)
-        self.push_thread_ref = threading.Thread(name="push_thread", target=self.push_thread)
+        # self.push_thread_ref = threading.Thread(name="push_thread", target=self.push_thread)
         self.pull_thread_ref.daemon = True
-        self.push_thread_ref.daemon = True
+        #self.push_thread_ref.daemon = True
 
         self.pull_thread_ref.start()
-        self.push_thread_ref.start()
+        # self.push_thread_ref.start()
 
     def redis_of(self, thing):
         return hash(thing) % len(self.rs)
