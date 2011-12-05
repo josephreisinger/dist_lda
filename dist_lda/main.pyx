@@ -61,6 +61,7 @@ class DistributedLDA:
                         assert m.topic_w[tz][w] > 0
                         lp.append(log(self.beta + m.topic_w[tz][w] - 1) + tdm1[tz])
                     else:
+                        assert m.topic_w[tz][w] >= 0
                         lp.append(log(self.beta + m.topic_w[tz][w]) + td[tz])
 
                 newz = sample_lp_mult(lp)
@@ -104,5 +105,6 @@ class DistributedLDA:
                     sys.stderr.write('... loaded %d documents [%s]\n' % (processed, d.name))
         sys.stderr.write("Loaded %d docs from [%s]\n" % (processed, self.options.document))
         assert processed > 0 # No Documents!
+        self.model.finished_loading_docs = True
         return self
 

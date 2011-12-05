@@ -40,16 +40,17 @@ class RedisLDAModelCache:
         self.delta_topic_d = defaultdict(lambda: defaultdict(int))
         self.delta_topic_w = defaultdict(lambda: defaultdict(int))
         self.delta_topic_wsum = defaultdict(int)
-        self.delta_lock = threading.RLock()
 
         # Stat counters
         self.pulls = 0
         self.pushes = 0
 
+        self.resample_count = 0
+
+        # Document state
         self.documents = []
         self.v = Vocabulary()
-
-        self.resample_count = 0
+        self.finished_loading_docs = False
 
         # Start threads for pull and push
         self.pull_thread_ref = threading.Thread(name="pull_thread", target=self.pull_thread)
@@ -66,20 +67,26 @@ class RedisLDAModelCache:
     def push_thread(self):
         while True:
             time.sleep(120*random.random())
-            self.push_local_state()
+            if self.finished_loading_docs:
+                self.push_local_state()
 
     def pull_thread(self):
         while True:
             time.sleep(120*random.random()) # Python doesn't have a yield
-            self.pull_global_state()
+            if self.finished_loading_docs:
+                self.pull_global_state()
 
     def lock_reset_delta_state(self):
+        """
+        Copy the current delta state over to a local variable and then reset it (atomic)
+
+        """
         local_delta_topic_d = defaultdict(lambda: defaultdict(int))
         local_delta_topic_w = defaultdict(lambda: defaultdict(int))
         local_delta_topic_wsum = defaultdict(int)
 
         # Lock and make a copy of the current delta state
-        with self.delta_lock:
+        with self.topic_lock:
             # Normally I would use deepcopy for this, but it barfs inside of cython... :-/
             for z,v in self.delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
@@ -114,10 +121,8 @@ class RedisLDAModelCache:
             # Update document state from deltas
             for z,v in local_delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
-                    if self.topic_d[z][d] == 0:  # This works because we're document sharding
-                        pipes[self.redis_of(d)].zrem(('d', z), d)
-                    else:
-                        pipes[self.redis_of(d)].zincrby(('d', z), d, delta)
+                    pipes[self.redis_of(d)].zincrby(('d', z), d, delta)
+                pipes[self.redis_of(d)].zremrangebyscore(('d', z), 0, 0)
 
             # Update topic state
             for z,v in local_delta_topic_w.iteritems():
@@ -174,15 +179,14 @@ class RedisLDAModelCache:
             self.topic_w = local_topic_w
             self.topic_wsum = local_topic_wsum
 
-            # XXX: will this ever deadlock?
-            with self.delta_lock:
-                for z,v in self.delta_topic_w.iteritems():
-                    for w, delta in v.iteritems():
-                        if delta != 0:
-                            self.topic_w[z][w] += delta
-                for z, delta in self.delta_topic_wsum.iteritems():
+            # Add in the current deltas
+            for z,v in self.delta_topic_w.iteritems():
+                for w, delta in v.iteritems():
                     if delta != 0:
-                        self.topic_wsum[z] += delta
+                        self.topic_w[z][w] += delta
+            for z, delta in self.delta_topic_wsum.iteritems():
+                if delta != 0:
+                    self.topic_wsum[z] += delta
 
         self.pulls += 1
 
@@ -208,7 +212,6 @@ class RedisLDAModelCache:
             self.topic_w[z][w] += 1
             self.topic_wsum[z] += 1
 
-        with self.delta_lock:
             self.delta_topic_d[z][d.id] += 1
             self.delta_topic_w[z][w] += 1
             self.delta_topic_wsum[z] += 1
@@ -230,8 +233,6 @@ class RedisLDAModelCache:
                 self.topic_w[newz][w] += 1
                 self.topic_wsum[newz] += 1
 
-
-            with self.delta_lock:
                 self.delta_topic_d[oldz][d.id] += -1
                 self.delta_topic_w[oldz][w] += -1
                 self.delta_topic_wsum[oldz] += -1
