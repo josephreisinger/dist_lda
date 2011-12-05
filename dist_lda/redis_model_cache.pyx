@@ -79,9 +79,7 @@ class RedisLDAModelCache:
         local_delta_topic_wsum = defaultdict(int)
 
         # Lock and make a copy of the current delta state
-        sys.stderr.write("XXXX: waiting for lock\n")
         with self.delta_lock:
-            sys.stderr.write("XXXX: got the lock\n")
             # Normally I would use deepcopy for this, but it barfs inside of cython... :-/
             for z,v in self.delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
@@ -143,7 +141,8 @@ class RedisLDAModelCache:
     def pull_global_state(self):
         # Note we don't need to pull the d state, since our shard is 100% responsible for it
 
-        # XXX: always push the local state first, otherwise we'll end up with inconsistencies
+        # Push the local state first; not sure of the impact of this, thought it roughly doubles the number of push synchronizations
+        # The delta re-apply logic below will actually take care of the inconsistencies this introduces
         self.push_local_state()
 
         # TODO: this logic leads to large transient memory spikes in each redis shard (say 3-4x baseline mem usage), when
