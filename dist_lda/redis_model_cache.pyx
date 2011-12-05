@@ -54,21 +54,12 @@ class RedisLDAModelCache:
 
         # Start threads for pull and push
         self.pull_thread_ref = threading.Thread(name="pull_thread", target=self.pull_thread)
-        # self.push_thread_ref = threading.Thread(name="push_thread", target=self.push_thread)
         self.pull_thread_ref.daemon = True
-        #self.push_thread_ref.daemon = True
 
         self.pull_thread_ref.start()
-        # self.push_thread_ref.start()
 
     def redis_of(self, thing):
         return hash(thing) % len(self.rs)
-
-    def push_thread(self):
-        while True:
-            time.sleep(120*random.random())
-            if self.finished_loading_docs:
-                self.push_local_state()
 
     def pull_thread(self):
         while True:
@@ -160,6 +151,8 @@ class RedisLDAModelCache:
         # TODO: this part can be pipelined as well
         # Pull down the global state (wsum and topic_w should be in the same transaction)
         with transact_block(self.rs) as pipes:
+            # XXX: try shuffling the pipes to see if this still causes clobbering
+            random.shuffle(pipes)
             # Remove everything with zero count to save memory
             for pipe in pipes:
                 for z in range(self.topics):

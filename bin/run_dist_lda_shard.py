@@ -3,13 +3,10 @@ from dist_lda import DistributedLDA
 
 if __name__ == '__main__':
     from argparse import ArgumentParser 
-    from multiprocessing import Pool
  
     parser = ArgumentParser() 
     parser.add_argument("--redis_db", type=int, default=0, help="Which redis DB") 
     parser.add_argument("--redis_hosts", type=str, default="localhost:6379", help="List of redises hosts for holding the model state") 
-
-    parser.add_argument("--cores", type=int, default=1, help="Number of cores to use") 
 
     parser.add_argument("--topics", type=int, default=100, help="Number of topics to use") 
     parser.add_argument("--alpha", type=float, default=0.1, help="Topic assignment smoother")
@@ -23,25 +20,8 @@ if __name__ == '__main__':
 
     options = parser.parse_args(sys.argv[1:]) 
 
-    sys.stderr.write('Running on %d cores\n' % options.cores)
-    
     sys.stderr.write("XXX: currently assuming unique docnames\n")
 
-    options.shards = options.cores * options.shards # split up even more
-
-
-    def run_local_shard(core_id):
-        # The basic idea here is the multiply the number of shards by the number of cores and
-        # split them up even more
-        options.this_shard = options.this_shard * options.cores + core_id
-        options.core_id = core_id
-        sys.stderr.write('initialize core %d on shard %d\n' % (core_id, options.this_shard))
-        DistributedLDA(options).load_initial_docs().iterate()
-
-    if options.cores > 1:
-        p = Pool(options.cores)
-        p.map(run_local_shard, range(options.cores))
-    else:
-        run_local_shard(0)
-
+    sys.stderr.write('running on shard %d\n' % (options.this_shard))
+    DistributedLDA(options).load_initial_docs().iterate()
 
