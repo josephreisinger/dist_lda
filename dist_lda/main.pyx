@@ -88,7 +88,7 @@ class DistributedLDA:
         for z in range(self.topics):
             sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.model.topic_to_string(self.model.topic_w[z])])))
         self.resamples += 1 
-        sys.stderr.write('|| DONE core=%d iter=%d resamples=%d pulls=%d pushes=%d (%d swaps %.4f%%)\n' % (self.options.core_id, iter, self.resamples, self.model.pulls, self.model.pushes, self.swaps, 100 * self.swaps / float(self.attempts)))
+        sys.stderr.write('|| DONE iter=%d resamples=%d pulls=%d pushes=%d (%d swaps %.4f%%)\n' % (iter, self.resamples, self.model.pulls, self.model.pushes, self.swaps, 100 * self.swaps / float(self.attempts)))
 
     @timed("load_initial_docs")
     def load_initial_docs(self):
