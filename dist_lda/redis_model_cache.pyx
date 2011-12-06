@@ -9,6 +9,14 @@ from collections import defaultdict
 from document import Vocabulary
 
 
+def st(a,b):
+    """ serialize a tuple """
+    return '%d-%d' % (a,b)
+def dt(a):
+    """ deserialize tuple """
+    return map(int, a.split('-'))
+
+
 class RedisLDAModelCache:
     """
     Holds the current assumed global state and the current local deltas 
@@ -112,14 +120,14 @@ class RedisLDAModelCache:
             # Update document state from deltas
             for z,v in local_delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
-                    pipes[self.redis_of(d)].zincrby('d', (z, d), delta)
+                    pipes[self.redis_of(d)].zincrby('d', st(z,d), delta)
             pipes[self.redis_of(d)].zremrangebyscore('d', 0, 0)
 
             # Update topic state
             for z,v in local_delta_topic_w.iteritems():
                 for w, delta in v.iteritems():
                     if delta != 0:
-                        pipes[self.redis_of(w)].zincrby('w', (z, w), delta)
+                        pipes[self.redis_of(w)].zincrby('w', st(z,w), delta)
             # Update sums
             for z, delta in local_delta_topic_wsum.iteritems():
                 if delta != 0:
@@ -158,7 +166,8 @@ class RedisLDAModelCache:
                     # Remove everything with zero count to save memory
                     for pipe in pipes:
                         # This is clever because it avoids sending the zeros over the wire
-                        for (z,w),v in pipe.zrevrangebyscore('w', float('inf'), 1, withscores=True).execute()[0]:
+                        for zw,v in pipe.zrevrangebyscore('w', float('inf'), 1, withscores=True).execute()[0]:
+                            z,w = dt(zw)
                             local_topic_w[int(z)][int(w)] = int(v)
 
                         for z,c in pipe.hgetall('wsum').execute()[0].iteritems():
@@ -274,14 +283,14 @@ def dump_model(rs):
         with transact_block(rs) as pipes:
             for pipe in pipes:
                 # This is clever because it avoids sending the zeros over the wire
-                for (z,w),v in pipe.zrevrangebyscore('w', float('inf'), 1, withscores=True).execute()[0]:
-                    d['w'][int(z)][int(w)] = int(v)
+                for zw,v in pipe.zrevrangebyscore('w', float('inf'), 1, withscores=True).execute()[0]:
+                    z,w = dt(zw)
+                    d['w'][z][w] = int(v)
                 # get documents
-                for z in range(d['topics']):
-                    pipe.zrevrangebyscore(('d', z), float('inf'), 1, withscores=True)
-                for z, zz in enumerate(pipe.execute()):
-                    for doc,v in zz:
-                        d['d'][z][doc] = int(v)
+
+                for zd,v in pipe.zrevrangebyscore(('d', z), float('inf'), 1, withscores=True).execute()[0]:
+                    z,d = dt(zd)
+                    d['d'][z][d] = int(v)
 
 
         f.write(json.dumps(d))
