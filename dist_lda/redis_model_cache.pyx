@@ -112,14 +112,14 @@ class RedisLDAModelCache:
             # Update document state from deltas
             for z,v in local_delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
-                    pipes[self.redis_of(d)].zincrby(('d', z), d, delta)
-                pipes[self.redis_of(d)].zremrangebyscore(('d', z), 0, 0)
+                    pipes[self.redis_of(d)].zincrby('d', (z, d), delta)
+            pipes[self.redis_of(d)].zremrangebyscore('d', 0, 0)
 
             # Update topic state
             for z,v in local_delta_topic_w.iteritems():
                 for w, delta in v.iteritems():
                     if delta != 0:
-                        pipes[self.redis_of(w)].zincrby(('w', z), w, delta)
+                        pipes[self.redis_of(w)].zincrby('w', (z, w), delta)
             # Update sums
             for z, delta in local_delta_topic_wsum.iteritems():
                 if delta != 0:
@@ -127,8 +127,7 @@ class RedisLDAModelCache:
 
             # Prune zeros from the w hash keys to save memory
             for pipe in pipes:
-                for z in range(self.topics):
-                    pipe.zremrangebyscore(('w', z), 0, 0)
+                pipe.zremrangebyscore('w', 0, 0)
 
         self.pushes += 1
 
@@ -145,25 +144,32 @@ class RedisLDAModelCache:
         #       client shards pile on. I haven't narrowed it down to whether it is the zrevrangebyscore or hgetall
         #       but neither seem to be particularly likely candidates; 
 
-        local_topic_w = defaultdict(lambda: defaultdict(int))
-        local_topic_wsum = defaultdict(int)
+        retry = 0
+        while retry < 5:
+            try:
+                local_topic_w = defaultdict(lambda: defaultdict(int))
+                local_topic_wsum = defaultdict(int)
 
-        # TODO: this part can be pipelined as well
-        # Pull down the global state (wsum and topic_w should be in the same transaction)
-        with transact_block(self.rs) as pipes:
-            # XXX: try shuffling the pipes to see if this still causes clobbering
-            random.shuffle(pipes)
-            # Remove everything with zero count to save memory
-            for pipe in pipes:
-                for z in range(self.topics):
-                    # This is clever because it avoids sending the zeros over the wire
-                    pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
-                for z, zz in enumerate(pipe.execute()):
-                    for w,v in zz:
-                        local_topic_w[z][int(w)] = int(v)
+                # TODO: this part can be pipelined as well
+                # Pull down the global state (wsum and topic_w should be in the same transaction)
+                with transact_block(self.rs) as pipes:
+                    # XXX: try shuffling the pipes to see if this still causes clobbering
+                    random.shuffle(pipes)
+                    # Remove everything with zero count to save memory
+                    for pipe in pipes:
+                        # This is clever because it avoids sending the zeros over the wire
+                        for (z,w),v in pipe.zrevrangebyscore('w', float('inf'), 1, withscores=True).execute()[0]:
+                            local_topic_w[int(z)][int(w)] = int(v)
 
-                for z,c in pipe.hgetall('wsum').execute()[0].iteritems():
-                    local_topic_wsum[int(z)] = int(c)
+                        for z,c in pipe.hgetall('wsum').execute()[0].iteritems():
+                            local_topic_wsum[int(z)] = int(c)
+                break
+            except Exception, e:
+                retry += 1
+                sys.stderr.write('[%s] exception on pull (retry=%d)\n' % (e, retry))
+        if retry == 5:
+            sys.stderr.write('ERROR: pull failed after 5 retries\n')
+            return  # don't reset our current view
 
         # Inform the running model about the new state
         # But, by this point we may actually be behind our own local state, so lock the deltas and apply them again
@@ -267,15 +273,9 @@ def dump_model(rs):
     with gzip.open('MODEL_%s-%s-T%d-alpha%.3f-beta%.3f-effective_iter=%d.json.gz' % (d['model'], doc_name, d['topics'], d['alpha'], d['beta'], int(d['iterations'] / float(d['shards']))), 'w') as f:
         with transact_block(rs) as pipes:
             for pipe in pipes:
-                for z in range(d['topics']):
-                    # This is clever because it avoids sending the zeros over the wire
-                    pipe.zrevrangebyscore(('w', z), float('inf'), 1, withscores=True)
-                # get words
-                for z, zz in enumerate(pipe.execute()):
-                    for w,v in zz:
-                        v = int(v)
-                        assert v > 0
-                        d['w'][z][w] = v
+                # This is clever because it avoids sending the zeros over the wire
+                for (z,w),v in pipe.zrevrangebyscore('w', float('inf'), 1, withscores=True).execute()[0]:
+                    d['w'][int(z)][int(w)] = int(v)
                 # get documents
                 for z in range(d['topics']):
                     pipe.zrevrangebyscore(('d', z), float('inf'), 1, withscores=True)
