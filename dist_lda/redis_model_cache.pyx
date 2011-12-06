@@ -121,8 +121,11 @@ class RedisLDAModelCache:
             for z,v in local_delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
                     pipes[self.redis_of(d)].zincrby('d', st(z,d), delta)
+
             pipes[self.redis_of(d)].zremrangebyscore('d', 0, 0)
 
+        # Push w state transactionally
+        with execute_block(self.rs, transaction=True) as pipes:
             # Update topic state
             for z,v in local_delta_topic_w.iteritems():
                 for w, delta in v.iteritems():
@@ -153,7 +156,7 @@ class RedisLDAModelCache:
         #       but neither seem to be particularly likely candidates; 
 
         retry = 0
-        while retry < 5:
+        while retry < 10:
             try:
                 local_topic_w = defaultdict(lambda: defaultdict(int))
                 local_topic_wsum = defaultdict(int)
@@ -176,8 +179,8 @@ class RedisLDAModelCache:
             except Exception, e:
                 retry += 1
                 sys.stderr.write('[%s] exception on pull (retry=%d)\n' % (e, retry))
-        if retry == 5:
-            sys.stderr.write('ERROR: pull failed after 5 retries\n')
+        if retry == 10:
+            sys.stderr.write('ERROR: pull failed after 10 retries\n')
             return  # don't reset our current view
 
         # Inform the running model about the new state
