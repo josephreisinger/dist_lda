@@ -1,17 +1,17 @@
 import sys
 import random
 from collections import defaultdict
-from math import log
+from libc.math cimport log
 from itertools import izip
-from sampler import sample_lp_mult
+from sampler import sample_cum_lp_mult, addLog
 from redis_model_cache import RedisLDAModelCache
 from utils import timed, open_or_gz
 from document import Document
 
 class DistributedLDA:
     def __init__(self, options):
-        self.model = RedisLDAModelCache(options)
         self.topics = options.topics
+        self.model = RedisLDAModelCache(options)
         self.beta = options.beta
         self.alpha = options.alpha
         self.options = options
@@ -33,38 +33,48 @@ class DistributedLDA:
         """
         Cache the Gibbs update math for this document
         """
-        dndm1 = log(self.alpha*self.topics + d.nd - 1) 
-        dnd   = log(self.alpha*self.topics + d.nd) 
-        tdm1 = defaultdict(float)
-        td   = defaultdict(float)
         m = self.model
+
+        cdef double dndm1 = log(self.alpha*self.topics + d.nd - 1)
+        cdef double dnd   = log(self.alpha*self.topics + d.nd) 
+        cdef double betaV = self.beta*m.v.size()
+        cdef int tz
+        tdm1 = defaultdict(float)  # keep this one sparse for now
+        # try preallocating td
+        td = [0 for tz in range(self.topics)]
         for tz in range(self.topics):
             assert m.topic_wsum[tz] >= 0
             if m.topic_wsum[tz] > 0 and m.topic_d[tz][d.id] > 0:
-                tdm1[tz] = -log(self.beta*m.v.size() + m.topic_wsum[tz] - 1) + log(self.alpha + m.topic_d[tz][d.id] - 1) - dndm1
+                tdm1[tz] = -log(betaV + m.topic_wsum[tz] - 1) + log(self.alpha + m.topic_d[tz][d.id] - 1) - dndm1
             
-            td[tz] = -log(self.beta*m.v.size() + m.topic_wsum[tz]) + log(self.alpha + (m.topic_d[tz][d.id])) - dnd
+            td[tz] = -log(betaV + m.topic_wsum[tz]) + log(self.alpha + (m.topic_d[tz][d.id])) - dnd
 
         return tdm1, td
 
     # @timed
     def resample_document(self, d):
+        cdef int topics = self.topics
+        cdef double s = 0
+        cdef double newz
+        cdef int tz
         m = self.model
 
         with m.topic_lock:
+            # try preallocating lp
+            cum_lp = [0 for tz in range(topics)]
             tdm1, td = self.cache_params(d)
             for i, (w,oldz) in enumerate(izip(d.dense, d.assignment)):
-                lp = []
-                for tz in range(self.topics):
+                s = 0
+                for tz in range(topics):
                     if tz == oldz:
-                        assert type(tz) == type(oldz)
                         assert m.topic_w[tz][w] > 0
-                        lp.append(log(self.beta + m.topic_w[tz][w] - 1) + tdm1[tz])
+                        s = addLog(s, log(self.beta + m.topic_w[tz][w] - 1) + tdm1[tz])
                     else:
                         assert m.topic_w[tz][w] >= 0
-                        lp.append(log(self.beta + m.topic_w[tz][w]) + td[tz])
+                        s = addLog(s, log(self.beta + m.topic_w[tz][w]) + td[tz])
+                    cum_lp[tz] = s
 
-                newz = sample_lp_mult(lp)
+                newz = sample_cum_lp_mult(cum_lp, topics)
                 self.model.move_d_w(w, d, i, oldz, newz)
 
                 self.attempts += 1

@@ -27,8 +27,8 @@ def execute_single(r, transaction=True):
 
 
 @contextmanager
-def transact_block(rs):
-    yield [r.pipeline() for r in rs]
+def transact_block(rs, transaction=True):
+    yield [r.pipeline(transaction=transaction) for r in rs]
 
 @contextmanager
 def execute_block(rs, transaction=True):
@@ -47,6 +47,7 @@ def execute_block(rs, transaction=True):
 
 def connect_redis_list(redises, db):
     redises = redises.split(',')
+    assert len(redises) == 1  # support for multiple redises is still wonky (can't guarantee transactions)
     # Get redis host and port
     connections = []
     for r in redises:

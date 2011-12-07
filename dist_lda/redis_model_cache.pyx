@@ -4,7 +4,7 @@ import threading
 import random
 import time
 from redis_utils import connect_redis_list, transact_block, transact_single, execute_block, execute_single
-from utils import timed
+from utils import timed, with_retries, copy_sparse_defaultdict_2, copy_sparse_defaultdict_1, merge_defaultdict_2, merge_defaultdict_1
 from collections import defaultdict
 from document import Vocabulary
 
@@ -14,7 +14,11 @@ def st(a,b):
     return '%d-%d' % (a,b)
 def dt(a):
     """ deserialize tuple """
-    return map(int, a.split('-'))
+    a, _, b = a.partition('-')
+    return int(a), int(b)
+
+
+
 
 
 class RedisLDAModelCache:
@@ -41,7 +45,7 @@ class RedisLDAModelCache:
         # Track the local model state
         self.topic_d = defaultdict(lambda: defaultdict(int))
         self.topic_w = defaultdict(lambda: defaultdict(int))
-        self.topic_wsum = defaultdict(float)
+        self.topic_wsum = defaultdict(int)
         self.topic_lock = threading.RLock()
 
         # Also track the deltas of the stuff we want to sync
@@ -75,29 +79,17 @@ class RedisLDAModelCache:
             if self.finished_loading_docs:
                 self.pull_global_state()
 
-    def lock_reset_delta_state(self):
+    def lock_fork_delta_state(self):
         """
         Copy the current delta state over to a local variable and then reset it (atomic)
 
         """
-        local_delta_topic_d = defaultdict(lambda: defaultdict(int))
-        local_delta_topic_w = defaultdict(lambda: defaultdict(int))
-        local_delta_topic_wsum = defaultdict(int)
-
         # Lock and make a copy of the current delta state
         with self.topic_lock:
             # Normally I would use deepcopy for this, but it barfs inside of cython... :-/
-            for z,v in self.delta_topic_d.iteritems():
-                for d, delta in v.iteritems():
-                    if delta != 0:
-                        local_delta_topic_d[z][d] = delta
-            for z,v in self.delta_topic_w.iteritems():
-                for w, delta in v.iteritems():
-                    if delta != 0:
-                        local_delta_topic_w[z][w] = delta
-            for z, delta in self.delta_topic_wsum.iteritems():
-                if delta != 0:
-                    local_delta_topic_wsum[z] = delta
+            local_delta_topic_d = copy_sparse_defaultdict_2(self.delta_topic_d)
+            local_delta_topic_w = copy_sparse_defaultdict_2(self.delta_topic_w)
+            local_delta_topic_wsum = copy_sparse_defaultdict_1(self.delta_topic_wsum)
 
             # Reset the deltas
             self.delta_topic_d = defaultdict(lambda: defaultdict(int))
@@ -106,26 +98,22 @@ class RedisLDAModelCache:
 
         return local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum
 
+    def lock_merge_delta_state(self, local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum):
+        with self.topic_lock:
+            merge_defaultdict_2(self.delta_topic_d, local_delta_topic_d)
+            merge_defaultdict_2(self.delta_topic_w, local_delta_topic_w)
+            merge_defaultdict_1(self.delta_topic_wsum, local_delta_topic_wsum)
 
-    @timed("push_local_state")
-    def push_local_state(self):
-        """
-        Push our current set of deltas to the server
-        """
-        local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum = self.lock_reset_delta_state()
-
-        # This a potentially long, blocking IO operation
-        # sys.stderr.write('Push local state...\n')
-        with execute_block(self.rs, transaction=False) as pipes:
+    @with_retries(10, "push_local_state_redis")
+    def push_local_state_redis(self, local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum):
+        # Push local state deltas transactionally (important to maintain state)
+        with execute_block(self.rs, transaction=True) as pipes:
             # Update document state from deltas
             for z,v in local_delta_topic_d.iteritems():
                 for d, delta in v.iteritems():
                     pipes[self.redis_of(d)].zincrby('d', st(z,d), delta)
 
             pipes[self.redis_of(d)].zremrangebyscore('d', 0, 0)
-
-        # Push w state transactionally
-        with execute_block(self.rs, transaction=True) as pipes:
             # Update topic state
             for z,v in local_delta_topic_w.iteritems():
                 for w, delta in v.iteritems():
@@ -134,14 +122,53 @@ class RedisLDAModelCache:
             # Update sums
             for z, delta in local_delta_topic_wsum.iteritems():
                 if delta != 0:
-                    pipes[self.redis_of(z)].hincrby('wsum', z, delta)
+                    pipes[self.redis_of(-1)].zincrby('w', st(z,-1), delta)
 
             # Prune zeros from the w hash keys to save memory
             for pipe in pipes:
                 pipe.zremrangebyscore('w', 0, 0)
 
-        self.pushes += 1
+    @timed("push_local_state")
+    def push_local_state(self):
+        """
+        Push our current set of deltas to the server
+        """
+        local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum = self.lock_fork_delta_state()
 
+        # Man, wouldn't it be awesome if python had more expressive callbacks?
+        (success, _) = self.push_local_state_redis(local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum)
+
+        if success:
+            self.pushes += 1
+        else:
+            # on failure, merge our forked deltas back with the trunk; we'll retry later
+            sys.stderr.write('ERROR: push failed after 10 retries; merging local deltas\n')
+            self.lock_merge_delta_state(local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum)
+
+    @with_retries(10, "pull_global_state_redis")
+    def pull_global_state_redis(self):
+        # TODO: this logic leads to large transient memory spikes in each redis shard (say 3-4x baseline mem usage), when
+        #       client shards pile on. I haven't narrowed it down to whether it is the zrevrangebyscore or hgetall
+        #       but neither seem to be particularly likely candidates; 
+
+        local_topic_w = defaultdict(lambda: defaultdict(int))
+        local_topic_wsum = defaultdict(int)
+
+        # TODO: this part can be pipelined as well
+        # Pull down the global state (wsum and topic_w should be in the same transaction)
+        with transact_block(self.rs, transaction=True) as pipes:
+            # XXX: try shuffling the pipes to see if this still causes clobbering
+            random.shuffle(pipes)
+            # Remove everything with zero count to save memory
+            for pipe in pipes:
+                for zw, v in pipe.zrevrangebyscore('w', float('inf'), 1, withscores=True).execute()[0]:
+                    z,w = dt(zw)
+                    if w >= 0:
+                        local_topic_w[int(z)][int(w)] = int(v)
+                    else:
+                        local_topic_wsum[int(z)] = int(v)
+
+        return local_topic_w, local_topic_wsum
 
     @timed("pull_global_state")
     def pull_global_state(self):
@@ -151,55 +178,26 @@ class RedisLDAModelCache:
         # The delta re-apply logic below will actually take care of the inconsistencies this introduces
         self.push_local_state()
 
-        # TODO: this logic leads to large transient memory spikes in each redis shard (say 3-4x baseline mem usage), when
-        #       client shards pile on. I haven't narrowed it down to whether it is the zrevrangebyscore or hgetall
-        #       but neither seem to be particularly likely candidates; 
+        (success, (local_topic_w, local_topic_wsum)) = self.pull_global_state_redis()
 
-        retry = 0
-        while retry < 10:
-            try:
-                local_topic_w = defaultdict(lambda: defaultdict(int))
-                local_topic_wsum = defaultdict(int)
+        if success:
+            # Inform the running model about the new state
+            # But, by this point we may actually be behind our own local state, so lock the deltas and apply them again
+            # (this is the price we pay for not locking over the entire pull)
+            with self.topic_lock:
+                self.topic_w = local_topic_w
+                self.topic_wsum = local_topic_wsum
 
-                # TODO: this part can be pipelined as well
-                # Pull down the global state (wsum and topic_w should be in the same transaction)
-                with transact_block(self.rs) as pipes:
-                    # XXX: try shuffling the pipes to see if this still causes clobbering
-                    random.shuffle(pipes)
-                    # Remove everything with zero count to save memory
-                    for pipe in pipes:
-                        # This is clever because it avoids sending the zeros over the wire
-                        for zw,v in pipe.zrevrangebyscore('w', float('inf'), 1, withscores=True).execute()[0]:
-                            z,w = dt(zw)
-                            local_topic_w[int(z)][int(w)] = int(v)
-
-                        for z,c in pipe.hgetall('wsum').execute()[0].iteritems():
-                            local_topic_wsum[int(z)] = int(c)
-                break
-            except Exception, e:
-                retry += 1
-                sys.stderr.write('[%s] exception on pull (retry=%d)\n' % (e, retry))
-        if retry == 10:
-            sys.stderr.write('ERROR: pull failed after 10 retries\n')
-            return  # don't reset our current view
-
-        # Inform the running model about the new state
-        # But, by this point we may actually be behind our own local state, so lock the deltas and apply them again
-        # (this is the price we pay for not locking over the entire pull)
-        with self.topic_lock:
-            self.topic_w = local_topic_w
-            self.topic_wsum = local_topic_wsum
-
-            # Add in the current deltas
-            for z,v in self.delta_topic_w.iteritems():
-                for w, delta in v.iteritems():
+                # Add in the current deltas
+                for z,v in self.delta_topic_w.iteritems():
+                    for w, delta in v.iteritems():
+                        if delta != 0:
+                            self.topic_w[z][w] += delta
+                for z, delta in self.delta_topic_wsum.iteritems():
                     if delta != 0:
-                        self.topic_w[z][w] += delta
-            for z, delta in self.delta_topic_wsum.iteritems():
-                if delta != 0:
-                    self.topic_wsum[z] += delta
+                        self.topic_wsum[z] += delta
 
-        self.pulls += 1
+            self.pulls += 1
 
     
     def topic_to_string(self, topic, max_length=20):
@@ -288,7 +286,10 @@ def dump_model(rs):
                 # This is clever because it avoids sending the zeros over the wire
                 for zw,v in pipe.zrevrangebyscore('w', float('inf'), 1, withscores=True).execute()[0]:
                     z,w = dt(zw)
-                    d['w'][z][w] = int(v)
+                    if z >=0 :
+                        d['w'][z][w] = int(v)
+                    else:
+                        pass # discard wsum for now
                 # get documents
 
                 for zd,v in pipe.zrevrangebyscore(('d', z), float('inf'), 1, withscores=True).execute()[0]:
