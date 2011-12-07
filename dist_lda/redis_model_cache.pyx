@@ -185,17 +185,8 @@ class RedisLDAModelCache:
             # But, by this point we may actually be behind our own local state, so lock the deltas and apply them again
             # (this is the price we pay for not locking over the entire pull)
             with self.topic_lock:
-                self.topic_w = local_topic_w
-                self.topic_wsum = local_topic_wsum
-
-                # Add in the current deltas
-                for z,v in self.delta_topic_w.iteritems():
-                    for w, delta in v.iteritems():
-                        if delta != 0:
-                            self.topic_w[z][w] += delta
-                for z, delta in self.delta_topic_wsum.iteritems():
-                    if delta != 0:
-                        self.topic_wsum[z] += delta
+                self.topic_w = merge_defaultdict_2(local_topic_w, self.delta_topic_w)
+                self.topic_wsum = merge_defaultdict_1(local_topic_wsum, self.delta_topic_wsum)
 
             self.pulls += 1
 

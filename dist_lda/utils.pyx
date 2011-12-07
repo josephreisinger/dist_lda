@@ -59,10 +59,13 @@ def copy_sparse_defaultdict_2(dd):
     return r
 
 
+# Will modify first argument
 def merge_defaultdict_1(result, x):
     for z, c in x.iteritems():
         result[z] += c
+    return result
 
 def merge_defaultdict_2(result, x):
     for z,v in x.iteritems():
-        merge_defaultdict_1(result, x[z])
+        result[z] = merge_defaultdict_1(result[z], x[z])
+    return result
