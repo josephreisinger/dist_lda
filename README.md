@@ -40,6 +40,8 @@ Note that you can pass multiple redis databases separating by comma, e.g.:
 --redis_hosts=tygra:6379,panthro:6379,lion-o:6379
 ```
 
+however, this is currently experimental, and will _not_ work if you have transient node failures.
+
 ## Performance
 * Make sure you have the hiredis package installed; this will significantly reduce message parsing time.
 * Performance bottleneck is communication. The ratio of worker shard updates to redis shards is critical, since there is a large amount of data transfer. Anecdotally I've found one master can coordinate up to ~20 model shards each with a few hundred MB of data before performance starts to degrade.
@@ -47,13 +49,12 @@ Note that you can pass multiple redis databases separating by comma, e.g.:
 
 
 ## Future Work
-* Unblock / pipeline execute() statements; make them thread parallel.
 * low-bit hash trick to reduce mem footprint
 * massive amount of benchmarking
 * Support for sharded data files instead of single massive ones
 * Automatic database flushing to avoid incorporating bits of stale models
-* ROBUSTNESS / failure detection.
 * Support for inference (duh)
+* Improve sampler performance (should be able to get this within a constant factor of the C++ reference implementation)
 
 ## BUGS
 * If individual processes die and restart, you'll get duplicate zombie words in the global state; fixing this would require some non trivial architectural work, and doesnt seem justified given the impact on the model.
