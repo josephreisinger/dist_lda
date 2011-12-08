@@ -1,4 +1,3 @@
-# cython: profile=True
 import sys
 import random
 from collections import defaultdict
