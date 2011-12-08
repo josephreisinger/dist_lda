@@ -27,10 +27,10 @@ class LDAModelCache(object):
     def post_initialize(self):
         pass
 
-    def insert_new_document(self, d, assignment_fn=None):
+    def insert_new_document(self, d, assignments=None):
         self.documents.append(d)
         for i,w in enumerate(d.dense):
-            self.add_d_w(w, d, i, z=assignment_fn())
+            self.add_d_w(w, d, i, z=assignments[i])
 
     def add_d_w(self, w, d, i, z=None):
         """

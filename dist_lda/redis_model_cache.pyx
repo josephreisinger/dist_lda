@@ -1,8 +1,10 @@
 import sys
+import os
 import threading
 import random
 import time
 import json
+import gzip
 from redis_utils import connect_redis_list, transact_block, transact_single, execute_block, execute_single
 from utils import timed, with_retries, copy_sparse_defaultdict_2, copy_sparse_defaultdict_1, merge_defaultdict_2, merge_defaultdict_1
 from collections import defaultdict
@@ -46,6 +48,8 @@ class RedisLDAModelCache(LDAModelCache):
 
         self.resample_count = 0
 
+        self.disk_journal_file = 'journal.%d.json.gz' % self.options.this_shard
+
     def post_initialize(self):
         """
         Start a thread for synchronizing state with the redis
@@ -69,14 +73,26 @@ class RedisLDAModelCache(LDAModelCache):
         """ 
         Journal the d assignments (needs to take place inside of a lock where the deltas are drained)
         """
-        sys.stderr.write('JOURNAL assignment state to disk\n')
-        with open('journal.%d.json' % self.options.this_shard, 'w') as f:
+        sys.stderr.write('JOURNAL assignment state to disk [%s]\n' % self.disk_journal_file)
+        with gzip.open(self.disk_journal_file, 'w') as f:
             for d in self.documents:
-                f.write('%s\n' % json.dumps({'id':d.id, 'assignment':d.assignment}))
+                f.write('%s\n' % json.dumps(d.assignment))
 
     def disk_journal_receipt(self, status):
-        with open('journal.%d.json' % self.options.this_shard, 'a') as f:
+        with gzip.open(self.disk_journal_file, 'a') as f:
             f.write('%s\n' % status)
+
+    def try_load_disk_journal(self):
+        if os.path.exists(self.disk_journal_file):
+            lines = gzip.open(self.disk_journal_file).readlines()
+            if lines[-1].strip() == 'OK':
+                sys.stderr.write('JOURNAL: restoring from previously journaled assignments\n')
+                return map(json.loads, lines[:-1])
+
+            sys.stderr.write('JOURNAL: previously journaled data is NOT OK\n')
+            assert False  # fail hard in this case
+        return None
+
 
     def lock_fork_delta_state(self):
         """

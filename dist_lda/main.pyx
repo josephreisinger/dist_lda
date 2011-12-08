@@ -126,13 +126,20 @@ class DistributedLDA(Sampler):
     def initialize(self):
         sys.stderr.write('Loading document shard %d / %d...\n' % (self.options.this_shard, self.options.shards))
         processed = 0
+
+        disk_journal = self.model.try_load_disk_journal()
+
         for line_no, line in enumerate(open_or_gz(self.options.document)):
             # Process every line because we need to build the vocabulary
             d = Document(line=line, vocab=self.model.v)
             if line_no % self.options.shards == self.options.this_shard:
                 d.build_rep()
-                self.model.insert_new_document(d, assignment_fn=lambda: random.randint(0, self.topics))
-                self.resample_document(d)
+                if disk_journal:
+                    assert len(disk_journal[processed]) == len(d.dense)
+                    self.model.insert_new_document(d, assignments=disk_journal[processed])
+                else:
+                    self.model.insert_new_document(d, assignments=[random.randint(0, self.topics) for x in d.dense])
+                    self.resample_document(d)
                 processed += 1
                 if processed % 1000 == 0:
                     sys.stderr.write('... loaded %d documents [%s]\n' % (processed, d.name))
