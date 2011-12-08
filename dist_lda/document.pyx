@@ -18,27 +18,23 @@ class Vocabulary:
 class Document:
     def __init__(self, name="NULL", line=None, vocab=None):
         self.name = name
-        self.dense = []
-        self.assignment = []
-        self.words = set()
-        self.nd = 0
         assert vocab is not None
         self.vocab = vocab
-        if line is not None:
-            self.parse_from_line(line)
+
+        self.name, self.word_counts = self.parse_lda_line(line)
+
         self.id = vocab.get(name)
 
-    def parse_from_line(self, line):
-        self.name, word_counts = self.parse_lda_line(line)
-        self.dense = [self.vocab.get(w) for w,c in word_counts for cc in range(c)]
+    def build_rep(self):
+        self.dense = [w for w,c in self.word_counts for cc in range(c)]
+        self.assignment = [0 for w in self.dense]
         self.words = set(self.dense)
         self.nd = len(self.dense)
 
-    @staticmethod
-    def parse_lda_line(line):
+    def parse_lda_line(self, line):
         head, _, tokens = line.partition('\t')
         tokens = [x.rpartition(':') for x in tokens.split('\t')]
 
-        return head, [(w, int(c)) for w,_,c in tokens]
+        return head, [(self.vocab.get(w), int(c)) for w,_,c in tokens]
 
 

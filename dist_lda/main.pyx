@@ -1,12 +1,45 @@
+# cython: profile=True
 import sys
 import random
 from collections import defaultdict
-from libc.math cimport log
+from libc.math cimport exp, log
 from itertools import izip
-from sampler import sample_cum_lp_mult, addLog
 from redis_model_cache import RedisLDAModelCache
 from utils import timed, open_or_gz
 from document import Document
+
+  
+cdef inline double addLog(double x, double y):
+    if x == 0:
+        return y
+    elif y == 0:
+        return x
+    elif x-y > 16:
+        return x
+    elif x > y:
+        return x + log(1 + exp(y-x))
+    elif y-x > 16:
+        return y
+    else:
+        return y + log(1 + exp(x-y))
+
+# XXX: this version is O(log(n)) but requires cumulative weights as inputs
+# adapted from:
+# http://blog.scaron.info/index.php/2011/06/better-weighted-random-choice-with-sagecython/
+cdef int sample_cum_lp_mult(list cum_lp, int L):
+    cdef double l_cut = log(random.random()) + cum_lp[-1]
+    cdef int start = 0, mid, stop = L
+    # edge case
+    if l_cut <= cum_lp[start]:
+        return 0
+    while start < stop - 1:
+        mid = (start + stop) / 2
+        if cum_lp[mid] <= l_cut:
+            start = mid
+        else:
+            stop = mid
+    return stop
+
 
 class DistributedLDA:
     def __init__(self, options):
@@ -24,54 +57,42 @@ class DistributedLDA:
     def insert_new_document(self, d):
         # sys.stderr.write('Inserting [%s]\n' % d.name)
         self.model.documents.append(d)
-        d.assignment = []
-        for w in d.dense:
-            self.model.add_d_w(d, w, z=random.randint(0, self.topics))
-
-    # @timed
-    def cache_params(self, d):
-        """
-        Cache the Gibbs update math for this document
-        """
-        m = self.model
-
-        cdef double dndm1 = log(self.alpha*self.topics + d.nd - 1)
-        cdef double dnd   = log(self.alpha*self.topics + d.nd) 
-        cdef double betaV = self.beta*m.v.size()
-        cdef int tz
-        tdm1 = defaultdict(float)  # keep this one sparse for now
-        # try preallocating td
-        td = [0 for tz in range(self.topics)]
-        for tz in range(self.topics):
-            assert m.topic_wsum[tz] >= 0
-            if m.topic_wsum[tz] > 0 and m.topic_d[tz][d.id] > 0:
-                tdm1[tz] = -log(betaV + m.topic_wsum[tz] - 1) + log(self.alpha + m.topic_d[tz][d.id] - 1) - dndm1
-            
-            td[tz] = -log(betaV + m.topic_wsum[tz]) + log(self.alpha + (m.topic_d[tz][d.id])) - dnd
-
-        return tdm1, td
+        for i,w in enumerate(d.dense):
+            self.model.add_d_w(w, d, i, z=random.randint(0, self.topics))
 
     # @timed
     def resample_document(self, d):
+        m = self.model
         cdef int topics = self.topics
         cdef double s = 0
-        cdef double newz
+        cdef int newz
         cdef int tz
-        m = self.model
+        cdef int i
+        cdef int did = d.id
+        cdef double dndm1 = log(self.alpha*self.topics + d.nd - 1)
+        cdef double dnd   = log(self.alpha*self.topics + d.nd) 
+        cdef double betaV = self.beta*m.v.size()
 
         with m.topic_lock:
-            # try preallocating lp
-            cum_lp = [0 for tz in range(topics)]
-            tdm1, td = self.cache_params(d)
+            cum_lp = [0 for i in range(topics)]
             for i, (w,oldz) in enumerate(izip(d.dense, d.assignment)):
                 s = 0
                 for tz in range(topics):
+                    # Obviously, vast majority of time is spent in this block
                     if tz == oldz:
                         assert m.topic_w[tz][w] > 0
-                        s = addLog(s, log(self.beta + m.topic_w[tz][w] - 1) + tdm1[tz])
+                        s = addLog(s, \
+                                log(self.beta + m.topic_w[tz][w] - 1) \
+                                - log(betaV + m.topic_wsum[tz] - 1) \
+                                + log(self.alpha + m.topic_d[tz][did] - 1) \
+                                - dndm1)
                     else:
                         assert m.topic_w[tz][w] >= 0
-                        s = addLog(s, log(self.beta + m.topic_w[tz][w]) + td[tz])
+                        s = addLog(s, \
+                                log(self.beta + m.topic_w[tz][w]) \
+                                - log(betaV + m.topic_wsum[tz]) \
+                                + log(self.alpha + m.topic_d[tz][did]) \
+                                - dnd)
                     cum_lp[tz] = s
 
                 newz = sample_cum_lp_mult(cum_lp, topics)
@@ -108,11 +129,13 @@ class DistributedLDA:
             # Process every line because we need to build the vocabulary
             d = Document(line=line, vocab=self.model.v)
             if line_no % self.options.shards == self.options.this_shard:
+                d.build_rep()
                 self.insert_new_document(d)
                 self.resample_document(d)
                 processed += 1
                 if processed % 1000 == 0:
                     sys.stderr.write('... loaded %d documents [%s]\n' % (processed, d.name))
+        open('%d.vocab'%self.options.this_shard, 'w').write('\n'.join(['%s %d' % (k,v) for k,v in sorted(self.model.v.to_id.iteritems())]))
         sys.stderr.write("Loaded %d docs from [%s]\n" % (processed, self.options.document))
         assert processed > 0 # No Documents!
         self.model.finished_loading_docs = True

@@ -1,3 +1,4 @@
+# cython: profile=True
 import sys
 import heapq
 import threading
@@ -16,8 +17,6 @@ def dt(a):
     """ deserialize tuple """
     a, _, b = a.partition('-')
     return int(a), int(b)
-
-
 
 
 
@@ -203,11 +202,11 @@ class RedisLDAModelCache:
         return heapq.nlargest(max_length, result)
 
 
-    def add_d_w(self, d, w, z=None):
+    def add_d_w(self, w, d, i, z=None):
         """
         Add word w to document d
         """
-        d.assignment.append(z)
+        d.assignment[i] = z
 
         with self.topic_lock:
             self.topic_d[z][d.id] += 1
@@ -222,26 +221,23 @@ class RedisLDAModelCache:
         """
         Move w from oldz to newz
         """
+        # XXX: should only call this inside the lock
         if newz != oldz:
-            with self.topic_lock:
-                self.topic_d[oldz][d.id] += -1
-                self.topic_w[oldz][w] += -1
-                self.topic_wsum[oldz] += -1
-                assert self.topic_d[oldz][d.id] >= 0
-                assert self.topic_w[oldz][w] >= 0
-                assert self.topic_wsum[oldz] >= 0
+            self.topic_d[oldz][d.id] += -1
+            self.topic_w[oldz][w] += -1
+            self.topic_wsum[oldz] += -1
 
-                self.topic_d[newz][d.id] += 1
-                self.topic_w[newz][w] += 1
-                self.topic_wsum[newz] += 1
+            self.topic_d[newz][d.id] += 1
+            self.topic_w[newz][w] += 1
+            self.topic_wsum[newz] += 1
 
-                self.delta_topic_d[oldz][d.id] += -1
-                self.delta_topic_w[oldz][w] += -1
-                self.delta_topic_wsum[oldz] += -1
+            self.delta_topic_d[oldz][d.id] += -1
+            self.delta_topic_w[oldz][w] += -1
+            self.delta_topic_wsum[oldz] += -1
 
-                self.delta_topic_d[newz][d.id] += 1
-                self.delta_topic_w[newz][w] += 1
-                self.delta_topic_wsum[newz] += 1
+            self.delta_topic_d[newz][d.id] += 1
+            self.delta_topic_w[newz][w] += 1
+            self.delta_topic_wsum[newz] += 1
 
             d.assignment[i] = newz
 
