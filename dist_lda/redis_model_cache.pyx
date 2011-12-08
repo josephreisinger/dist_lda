@@ -75,7 +75,8 @@ class RedisLDAModelCache:
 
     def pull_thread(self):
         while True:
-            time.sleep(120*random.random()) # Python doesn't have a yield
+            # TODO: make this a function of iterations not time
+            time.sleep(1200*random.random()) # Python doesn't have a yield
             if self.finished_loading_docs:
                 self.pull_global_state()
 
@@ -106,7 +107,7 @@ class RedisLDAModelCache:
 
     @with_retries(10, "push_local_state_redis")
     def push_local_state_redis(self, local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum):
-        # Push local state deltas transactionally (important to maintain state)
+        # Push local state deltas transactionally (important to maintain state / bc other consumers might make pull requests)
         with execute_block(self.rs, transaction=True) as pipes:
             # Update document state from deltas
             for z,v in local_delta_topic_d.iteritems():
@@ -155,7 +156,8 @@ class RedisLDAModelCache:
         local_topic_wsum = defaultdict(int)
 
         # TODO: this part can be pipelined as well
-        # Pull down the global state (wsum and topic_w should be in the same transaction)
+        # Pull down the global state 
+        # XXX: TODO: this might need to be transactional
         with transact_block(self.rs, transaction=True) as pipes:
             # XXX: try shuffling the pipes to see if this still causes clobbering
             random.shuffle(pipes)
