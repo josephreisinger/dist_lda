@@ -1,4 +1,3 @@
-# cython: profile=True
 import sys
 import random
 from collections import defaultdict
@@ -41,7 +40,22 @@ cdef int sample_cum_lp_mult(list cum_lp, int L):
     return stop
 
 
-class DistributedLDA:
+class Sampler:
+    def iterate(self, iterations=None):
+        if iterations == None:
+            iterations = self.options.iterations
+        for iter in range(iterations):
+            self.do_iteration(iter)
+        return self
+
+    def initialize(self):
+        raise 'NYI'
+
+    def do_iteration(self, iter):
+        raise 'NYI'
+
+
+class DistributedLDA(Sampler):
     def __init__(self, options):
         self.topics = options.topics
         self.model = RedisLDAModelCache(options)
@@ -53,12 +67,6 @@ class DistributedLDA:
         self.swaps = 0
         self.attempts = 0
         self.resamples = 0
-
-    def insert_new_document(self, d):
-        # sys.stderr.write('Inserting [%s]\n' % d.name)
-        self.model.documents.append(d)
-        for i,w in enumerate(d.dense):
-            self.model.add_d_w(w, d, i, z=random.randint(0, self.topics))
 
     # @timed
     def resample_document(self, d):
@@ -102,27 +110,20 @@ class DistributedLDA:
                 if newz != oldz:
                     self.swaps += 1
 
-    def iterate(self, iterations=None):
-        if iterations == None:
-            iterations = self.options.iterations
-        for iter in range(iterations):
-            self.do_iteration(iter)
-            self.model.finalize_iteration(iter)
-        return self
-
     @timed("do_iteration")
     def do_iteration(self, iter):
         self.swaps, self.attempts = 0, 0
         for d in self.model.documents:
             self.resample_document(d)
+        self.model.finalize_iteration(iter)
         # Print out the topics
         for z in range(self.topics):
             sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.model.topic_to_string(self.model.topic_w[z])])))
         self.resamples += 1 
         sys.stderr.write('|| DONE iter=%d resamples=%d pulls=%d pushes=%d (%d swaps %.4f%%)\n' % (iter, self.resamples, self.model.pulls, self.model.pushes, self.swaps, 100 * self.swaps / float(self.attempts)))
 
-    @timed("load_initial_docs")
-    def load_initial_docs(self):
+    @timed("initialize")
+    def initialize(self):
         sys.stderr.write('Loading document shard %d / %d...\n' % (self.options.this_shard, self.options.shards))
         processed = 0
         for line_no, line in enumerate(open_or_gz(self.options.document)):
@@ -130,14 +131,13 @@ class DistributedLDA:
             d = Document(line=line, vocab=self.model.v)
             if line_no % self.options.shards == self.options.this_shard:
                 d.build_rep()
-                self.insert_new_document(d)
+                self.model.insert_new_document(d, assignment_fn=lambda: random.randint(0, self.topics))
                 self.resample_document(d)
                 processed += 1
                 if processed % 1000 == 0:
                     sys.stderr.write('... loaded %d documents [%s]\n' % (processed, d.name))
-        open('%d.vocab'%self.options.this_shard, 'w').write('\n'.join(['%s %d' % (k,v) for k,v in sorted(self.model.v.to_id.iteritems())]))
         sys.stderr.write("Loaded %d docs from [%s]\n" % (processed, self.options.document))
         assert processed > 0 # No Documents!
-        self.model.finished_loading_docs = True
+        self.model.post_initialize()
         return self
 

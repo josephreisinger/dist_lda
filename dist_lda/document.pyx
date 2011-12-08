@@ -37,4 +37,3 @@ class Document:
 
         return head, [(self.vocab.get(w), int(c)) for w,_,c in tokens]
 
-

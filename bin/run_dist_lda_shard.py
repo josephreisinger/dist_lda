@@ -23,5 +23,5 @@ if __name__ == '__main__':
     sys.stderr.write("XXX: currently assuming unique docnames\n")
 
     sys.stderr.write('running on shard %d\n' % (options.this_shard))
-    DistributedLDA(options).load_initial_docs().iterate()
+    DistributedLDA(options).initialize().iterate()
 

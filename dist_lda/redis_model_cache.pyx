@@ -1,14 +1,14 @@
-# cython: profile=True
 import sys
-import heapq
 import threading
 import random
 import time
 from redis_utils import connect_redis_list, transact_block, transact_single, execute_block, execute_single
 from utils import timed, with_retries, copy_sparse_defaultdict_2, copy_sparse_defaultdict_1, merge_defaultdict_2, merge_defaultdict_1
 from collections import defaultdict
-from document import Vocabulary
+from lda_model import LDAModelCache
 
+# TODO: abstract out the redis cache part into a generic trait
+# TODO: add the LDACache back to the LDAModel
 
 def st(a,b):
     """ serialize a tuple """
@@ -19,18 +19,16 @@ def dt(a):
     return int(a), int(b)
 
 
-
-class RedisLDAModelCache:
+class RedisLDAModelCache(LDAModelCache):
     """
-    Holds the current assumed global state and the current local deltas 
-    to the LDA model.
-
-    Currently this holds the entire local model state and can do the sync.
+    Subclass LDAModelCache with an additional thread that syncs to a redis
     """
     def __init__(self, options):
+        super(RedisLDAModelCache, self).__init__(options)
+
         self.rs = connect_redis_list(options.redis_hosts, options.redis_db)
 
-        self.topics = options.topics
+        self.topic_lock = threading.RLock()
 
         # Store some metadata
         for r in self.rs:
@@ -41,28 +39,13 @@ class RedisLDAModelCache:
             r.set('document', options.document)
             r.incr('shards', 1)
 
-        # Track the local model state
-        self.topic_d = defaultdict(lambda: defaultdict(int))
-        self.topic_w = defaultdict(lambda: defaultdict(int))
-        self.topic_wsum = defaultdict(int)
-        self.topic_lock = threading.RLock()
-
-        # Also track the deltas of the stuff we want to sync
-        self.delta_topic_d = defaultdict(lambda: defaultdict(int))
-        self.delta_topic_w = defaultdict(lambda: defaultdict(int))
-        self.delta_topic_wsum = defaultdict(int)
-
         # Stat counters
         self.pulls = 0
         self.pushes = 0
 
         self.resample_count = 0
 
-        # Document state
-        self.documents = []
-        self.v = Vocabulary()
-        self.finished_loading_docs = False
-
+    def post_initialize(self):
         # Start threads for pull and push
         self.pull_thread_ref = threading.Thread(name="pull_thread", target=self.pull_thread)
         self.pull_thread_ref.daemon = True
@@ -76,8 +59,7 @@ class RedisLDAModelCache:
         while True:
             # TODO: make this a function of iterations not time
             time.sleep(1200*random.random()) # Python doesn't have a yield
-            if self.finished_loading_docs:
-                self.pull_global_state()
+            self.pull_global_state()
 
     def lock_fork_delta_state(self):
         """
@@ -191,56 +173,6 @@ class RedisLDAModelCache:
 
             self.pulls += 1
 
-    
-    def topic_to_string(self, topic, max_length=20):
-        result = []
-        for w,c in topic.iteritems():
-            if len(result) > max_length:
-                heapq.heappushpop(result, (c,self.v.rev(w)))
-            else:
-                heapq.heappush(result, (c,self.v.rev(w)))
-        return heapq.nlargest(max_length, result)
-
-
-    def add_d_w(self, w, d, i, z=None):
-        """
-        Add word w to document d
-        """
-        d.assignment[i] = z
-
-        with self.topic_lock:
-            self.topic_d[z][d.id] += 1
-            self.topic_w[z][w] += 1
-            self.topic_wsum[z] += 1
-
-            self.delta_topic_d[z][d.id] += 1
-            self.delta_topic_w[z][w] += 1
-            self.delta_topic_wsum[z] += 1
-
-    def move_d_w(self, w, d, i, oldz, newz):
-        """
-        Move w from oldz to newz
-        """
-        # XXX: should only call this inside the lock
-        if newz != oldz:
-            self.topic_d[oldz][d.id] += -1
-            self.topic_w[oldz][w] += -1
-            self.topic_wsum[oldz] += -1
-
-            self.topic_d[newz][d.id] += 1
-            self.topic_w[newz][w] += 1
-            self.topic_wsum[newz] += 1
-
-            self.delta_topic_d[oldz][d.id] += -1
-            self.delta_topic_w[oldz][w] += -1
-            self.delta_topic_wsum[oldz] += -1
-
-            self.delta_topic_d[newz][d.id] += 1
-            self.delta_topic_w[newz][w] += 1
-            self.delta_topic_wsum[newz] += 1
-
-            d.assignment[i] = newz
-
     def finalize_iteration(self, iter):
         if iter == 0:
             with execute_single(self.rs[0], transaction=False) as pipe:
@@ -250,6 +182,7 @@ class RedisLDAModelCache:
             r.incr('iterations')
 
 
+# TODO: move this inside of the class
 def dump_model(rs):
     import gzip
     import json
