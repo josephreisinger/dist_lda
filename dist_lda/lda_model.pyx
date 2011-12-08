@@ -7,6 +7,7 @@ class LDAModelCache(object):
     Holds the state of an LDA model and implements basic operations for interacting
     """
     def __init__(self, options):
+        self.options = options
         self.topics = options.topics
 
         # Track the local model state

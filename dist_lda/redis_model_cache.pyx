@@ -2,6 +2,7 @@ import sys
 import threading
 import random
 import time
+import json
 from redis_utils import connect_redis_list, transact_block, transact_single, execute_block, execute_single
 from utils import timed, with_retries, copy_sparse_defaultdict_2, copy_sparse_defaultdict_1, merge_defaultdict_2, merge_defaultdict_1
 from collections import defaultdict
@@ -46,25 +47,40 @@ class RedisLDAModelCache(LDAModelCache):
         self.resample_count = 0
 
     def post_initialize(self):
-        # Start threads for pull and push
+        """
+        Start a thread for synchronizing state with the redis
+        """
         self.pull_thread_ref = threading.Thread(name="pull_thread", target=self.pull_thread)
         self.pull_thread_ref.daemon = True
 
         self.pull_thread_ref.start()
 
+    def pull_thread(self):
+        while True:
+            self.pull_global_state()
+            # TODO: make this a function of iterations not time
+            time.sleep(1200*random.random()) # Python doesn't have a yield
+
     def redis_of(self, thing):
         return hash(thing) % len(self.rs)
 
-    def pull_thread(self):
-        while True:
-            # TODO: make this a function of iterations not time
-            time.sleep(1200*random.random()) # Python doesn't have a yield
-            self.pull_global_state()
+
+    def disk_journal_assignments(self):
+        """ 
+        Journal the d assignments (needs to take place inside of a lock where the deltas are drained)
+        """
+        sys.stderr.write('JOURNAL assignment state to disk\n')
+        with open('journal.%d.json' % self.options.this_shard, 'w') as f:
+            for d in self.documents:
+                f.write('%s\n' % json.dumps({'id':d.id, 'assignment':d.assignment}))
+
+    def disk_journal_receipt(self, status):
+        with open('journal.%d.json' % self.options.this_shard, 'a') as f:
+            f.write('%s\n' % status)
 
     def lock_fork_delta_state(self):
         """
         Copy the current delta state over to a local variable and then reset it (atomic)
-
         """
         # Lock and make a copy of the current delta state
         with self.topic_lock:
@@ -72,6 +88,10 @@ class RedisLDAModelCache(LDAModelCache):
             local_delta_topic_d = copy_sparse_defaultdict_2(self.delta_topic_d)
             local_delta_topic_w = copy_sparse_defaultdict_2(self.delta_topic_w)
             local_delta_topic_wsum = copy_sparse_defaultdict_1(self.delta_topic_wsum)
+
+            # TODO: this is potentially cleaner but requires an in memory copy of the assignments
+            # local_assignment_state = [{'id':d.id, 'assignments':d.assignments} for d in self.documents]
+            self.disk_journal_assignments()
 
             # Reset the deltas
             self.delta_topic_d = defaultdict(lambda: defaultdict(int))
@@ -122,7 +142,9 @@ class RedisLDAModelCache(LDAModelCache):
 
         if success:
             self.pushes += 1
+            self.disk_journal_receipt("OK")
         else:
+            self.disk_journal_receipt("FAIL")
             # on failure, merge our forked deltas back with the trunk; we'll retry later
             sys.stderr.write('ERROR: push failed after 10 retries; merging local deltas\n')
             self.lock_merge_delta_state(local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum)
