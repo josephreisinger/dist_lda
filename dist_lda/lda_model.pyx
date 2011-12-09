@@ -27,12 +27,12 @@ class LDAModelCache(object):
     def post_initialize(self):
         pass
 
-    def insert_new_document(self, d, assignments=None):
+    def insert_new_document(self, d, delta=True, assignments=None):
         self.documents.append(d)
         for i,w in enumerate(d.dense):
-            self.add_d_w(w, d, i, z=assignments[i])
+            self.add_d_w(w, d, i, delta=delta,  z=assignments[i])
 
-    def add_d_w(self, w, d, i, z=None):
+    def add_d_w(self, w, d, i, delta=True, z=None):
         """
         Add word w to document d
         """
@@ -42,10 +42,12 @@ class LDAModelCache(object):
         self.topic_d[z][d.id] += 1
         self.topic_w[z][w] += 1
         self.topic_wsum[z] += 1
-
-        self.delta_topic_d[z][d.id] += 1
-        self.delta_topic_w[z][w] += 1
-        self.delta_topic_wsum[z] += 1
+            
+        # shouldn't increment the deltas if we've restarted from journaled state
+        if delta:
+            self.delta_topic_d[z][d.id] += 1
+            self.delta_topic_w[z][w] += 1
+            self.delta_topic_wsum[z] += 1
 
     def move_d_w(self, w, d, i, oldz, newz):
         """

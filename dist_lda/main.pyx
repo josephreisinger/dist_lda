@@ -120,7 +120,7 @@ class DistributedLDA(Sampler):
         for z in range(self.topics):
             sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.model.topic_to_string(self.model.topic_w[z])])))
         self.resamples += 1 
-        sys.stderr.write('|| DONE iter=%d resamples=%d pulls=%d pushes=%d (%d swaps %.4f%%)\n' % (iter, self.resamples, self.model.pulls, self.model.pushes, self.swaps, 100 * self.swaps / float(self.attempts)))
+        sys.stderr.write('|| DONE shard=%d iter=%d resamples=%d pulls=%d pushes=%d (%d swaps %.4f%%)\n' % (self.options.this_shard, iter, self.resamples, self.model.pulls, self.model.pushes, self.swaps, 100 * self.swaps / float(self.attempts)))
 
     @timed("initialize")
     def initialize(self):
@@ -136,9 +136,9 @@ class DistributedLDA(Sampler):
                 d.build_rep()
                 if disk_journal:
                     assert len(disk_journal[processed]) == len(d.dense)
-                    self.model.insert_new_document(d, assignments=disk_journal[processed])
+                    self.model.insert_new_document(d, delta=False, assignments=disk_journal[processed])
                 else:
-                    self.model.insert_new_document(d, assignments=[random.randint(0, self.topics) for x in d.dense])
+                    self.model.insert_new_document(d, delta=True, assignments=[random.randint(0, self.topics) for x in d.dense])
                     self.resample_document(d)
                 processed += 1
                 if processed % 1000 == 0:
