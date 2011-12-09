@@ -35,15 +35,17 @@ def execute_block(rs, transaction=True):
     pipes = [r.pipeline(transaction=transaction) for r in rs]
     yield pipes
 
-    # The price we pay for using undocumented python features :(
-    # lifted from: http://bugs.python.org/issue10015
-    import threading, weakref
-    if not hasattr(threading.current_thread(), "_children"):
-        threading.current_thread()._children = weakref.WeakKeyDictionary()
+    if len(pipes) > 1:
+        # The price we pay for using undocumented python features :(
+        # lifted from: http://bugs.python.org/issue10015
+        import threading, weakref
+        if not hasattr(threading.current_thread(), "_children"):
+            threading.current_thread()._children = weakref.WeakKeyDictionary()
 
-    # Call each redis pipeline.execute in parallel 
-    Pool(MaxSimultaneousRedisConnections).map(lambda pipe: pipe.execute(), pipes)
-
+        # Call each redis pipeline.execute in parallel 
+        Pool(MaxSimultaneousRedisConnections).map(lambda pipe: pipe.execute(), pipes)
+    else:
+        pipes[0].execute()
 
 def connect_redis_list(redises, db):
     redises = redises.split(',')

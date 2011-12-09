@@ -56,18 +56,16 @@ class RedisLDAModelCache(LDAModelCache):
         """
         self.pull_thread_ref = threading.Thread(name="pull_thread", target=self.pull_thread)
         self.pull_thread_ref.daemon = True
-
         self.pull_thread_ref.start()
 
     def pull_thread(self):
         while True:
             self.pull_global_state()
             # TODO: make this a function of iterations not time
-            # time.sleep(1200*random.random()) # Python doesn't have a yield
+            time.sleep(1200*random.random()) # Python doesn't have a yield
 
     def redis_of(self, thing):
         return hash(thing) % len(self.rs)
-
 
     def disk_journal_assignments(self):
         """ 
@@ -92,7 +90,6 @@ class RedisLDAModelCache(LDAModelCache):
             sys.stderr.write('JOURNAL: previously journaled data is NOT OK\n')
             assert False  # fail hard in this case
         return None
-
 
     def lock_fork_delta_state(self):
         """
@@ -131,7 +128,6 @@ class RedisLDAModelCache(LDAModelCache):
                 for d, delta in v.iteritems():
                     pipes[self.redis_of(d)].zincrby('d', st(z,d), delta)
 
-            pipes[self.redis_of(d)].zremrangebyscore('d', 0, 0)
             # Update topic state
             for z,v in local_delta_topic_w.iteritems():
                 for w, delta in v.iteritems():
@@ -142,8 +138,10 @@ class RedisLDAModelCache(LDAModelCache):
                 if delta != 0:
                     pipes[self.redis_of(-1)].zincrby('w', st(z,-1), delta)
 
-            # Prune zeros from the w hash keys to save memory
+        # Prune zeros from the w hash keys to save memory (opportunisitically non-transactionally)
+        with execute_block(self.rs) as pipes:
             for pipe in pipes:
+                pipe.zremrangebyscore('d', 0, 0)
                 pipe.zremrangebyscore('w', 0, 0)
 
     @timed("push_local_state")
@@ -199,6 +197,8 @@ class RedisLDAModelCache(LDAModelCache):
         # The delta re-apply logic below will actually take care of the inconsistencies this introduces
         self.push_local_state()
 
+        time.sleep(600) # just for fun
+
         (success, (local_topic_w, local_topic_wsum)) = self.pull_global_state_redis()
 
         if success:
@@ -206,6 +206,7 @@ class RedisLDAModelCache(LDAModelCache):
             # But, by this point we may actually be behind our own local state, so lock the deltas and apply them again
             # (this is the price we pay for not locking over the entire pull)
             with self.topic_lock:
+                # self.topic_w now has reference to local_topic_w)
                 self.topic_w = merge_defaultdict_2(local_topic_w, self.delta_topic_w)
                 self.topic_wsum = merge_defaultdict_1(local_topic_wsum, self.delta_topic_wsum)
 
