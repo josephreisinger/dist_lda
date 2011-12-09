@@ -63,7 +63,7 @@ class RedisLDAModelCache(LDAModelCache):
         while True:
             self.pull_global_state()
             # TODO: make this a function of iterations not time
-            time.sleep(1200*random.random()) # Python doesn't have a yield
+            # time.sleep(1200*random.random()) # Python doesn't have a yield
 
     def redis_of(self, thing):
         return hash(thing) % len(self.rs)

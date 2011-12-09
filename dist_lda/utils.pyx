@@ -63,6 +63,7 @@ def copy_sparse_defaultdict_2(dd):
 def merge_defaultdict_1(result, x):
     for z, c in x.iteritems():
         result[z] += c
+        assert result[z] >= 0  # merge caused negative :(
     return result
 
 def merge_defaultdict_2(result, x):
