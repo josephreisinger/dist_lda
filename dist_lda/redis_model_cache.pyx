@@ -5,6 +5,7 @@ import random
 import time
 import json
 import gzip
+from itertools import izip
 from redis_utils import connect_redis_list, transact_block, transact_single, execute_block, execute_single
 from utils import *
 from collections import defaultdict
@@ -61,7 +62,8 @@ class RedisLDAModelCache(LDAModelCache):
         while True:
             self.pull_global_state()
             # TODO: make this a function of iterations not time
-            time.sleep(1200*random.random()) # Python doesn't have a yield
+            # time.sleep(1200*random.random()) # Python doesn't have a yield
+            time.sleep(0.1) # Python doesn't have a yield
 
     def redis_of(self, thing):
         return hash(thing) % len(self.rs)
@@ -148,10 +150,11 @@ class RedisLDAModelCache(LDAModelCache):
                             delta_vocab.add(w)
 
         # Prune zeros from the w hash keys to save memory (opportunisitically non-transactionally)
-        with timing("pushing zremrange w"):
-            with execute_block(self.rs) as pipes:
-                for w in delta_vocab:
-                    pipes[self.redis_of(w)].zremrangebyscore(to_key('w',w), 0, 0)
+        if random.random() < 1.0 / self.options.shards:
+            with timing("pushing zremrange w"):
+                with execute_block(self.rs) as pipes:
+                    for w in delta_vocab:
+                        pipes[self.redis_of(w)].zremrangebyscore(to_key('w',w), 0, 0)
 
     @timed("push_local_state")
     def push_local_state(self):
@@ -188,7 +191,7 @@ class RedisLDAModelCache(LDAModelCache):
             with transact_block(self.rs) as pipes:
                 for w in iter(self.v.to_word):
                     pipes[self.redis_of(w)].zrevrangebyscore(to_key('w',w), float('inf'), 1, withscores=True)
-                for w, zvs in enumerate(pipes[0].execute()):  # pipe[0], this is why we assert above
+                for w, zvs in izip(iter(self.v.to_word), pipes[0].execute()):  # pipe[0], this is why we assert above
                     for (z,v) in zvs:
                         local_topic_w[int(z)][int(w)] = int(v)
                         local_topic_wsum[int(z)] += int(v)
