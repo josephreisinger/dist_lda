@@ -6,21 +6,20 @@ import time
 import json
 import gzip
 from redis_utils import connect_redis_list, transact_block, transact_single, execute_block, execute_single
-from utils import timed, with_retries, copy_sparse_defaultdict_2, copy_sparse_defaultdict_1, merge_defaultdict_2, merge_defaultdict_1
+from utils import *
 from collections import defaultdict
 from lda_model import LDAModelCache
 
 # TODO: abstract out the redis cache part into a generic trait
 # TODO: add the LDACache back to the LDAModel
 
-def st(a,b):
-    """ serialize a tuple """
-    return '%d-%d' % (a,b)
-def dt(a):
-    """ deserialize tuple """
-    a, _, b = a.partition('-')
-    return int(a), int(b)
+# NOTE: waffled on having monolithic or fine-grained keys; monolithic causes too much blocking
 
+def to_key(a, b):
+    return "%s/%s" % (str(a), str(b))
+def from_key(k):
+    a, b = k.split('/')
+    return a, int(b)
 
 class RedisLDAModelCache(LDAModelCache):
     """
@@ -91,6 +90,7 @@ class RedisLDAModelCache(LDAModelCache):
             assert False  # fail hard in this case
         return None
 
+    @timed("lock_fork_delta_state")
     def lock_fork_delta_state(self):
         """
         Copy the current delta state over to a local variable and then reset it (atomic)
@@ -120,29 +120,38 @@ class RedisLDAModelCache(LDAModelCache):
             merge_defaultdict_1(self.delta_topic_wsum, local_delta_topic_wsum)
 
     @with_retries(10, "push_local_state_redis")
-    def push_local_state_redis(self, local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum):
-        # Push local state deltas transactionally (important to maintain state / bc other consumers might make pull requests)
-        with execute_block(self.rs, transaction=True) as pipes:
-            # Update document state from deltas
-            for z,v in local_delta_topic_d.iteritems():
-                for d, delta in v.iteritems():
-                    pipes[self.redis_of(d)].zincrby('d', st(z,d), delta)
+    def push_local_state_redis(self, local_delta_topic_d, local_delta_topic_w):
+        """
+        Push local state deltas transactionally (important to maintain state / bc other consumers might make pull requests)
+        """
+        # push d state (back to one key per document); this does not need to be in the same block as w since
+        # only the model listener process is looking at this information
+        with timing("pushing d state"):
+            with execute_block(self.rs, transaction=True) as pipes:
+                # Update document state from deltas
+                for z,v in local_delta_topic_d.iteritems():
+                    for d, delta in v.iteritems():
+                        pipes[self.redis_of(d)].zincrby(to_key('d',d), z, delta)
+                for doc in self.documents:
+                    d = doc.id
+                    pipes[self.redis_of(d)].zremrangebyscore(to_key('d',d), 0, 0)
 
-            # Update topic state
-            for z,v in local_delta_topic_w.iteritems():
-                for w, delta in v.iteritems():
-                    if delta != 0:
-                        pipes[self.redis_of(w)].zincrby('w', st(z,w), delta)
-            # Update sums
-            for z, delta in local_delta_topic_wsum.iteritems():
-                if delta != 0:
-                    pipes[self.redis_of(-1)].zincrby('w', st(z,-1), delta)
+        # w and d don't need to be in the same block ; have one key per word for even more fine-grained parallelism
+        delta_vocab = set()
+        with timing("pushing w state"):
+            with execute_block(self.rs, transaction=True) as pipes:
+                # Update topic state
+                for z,v in local_delta_topic_w.iteritems():
+                    for w, delta in v.iteritems():
+                        if delta != 0:
+                            pipes[self.redis_of(w)].zincrby(to_key('w',w), z, delta)
+                            delta_vocab.add(w)
 
         # Prune zeros from the w hash keys to save memory (opportunisitically non-transactionally)
-        with execute_block(self.rs) as pipes:
-            for pipe in pipes:
-                pipe.zremrangebyscore('d', 0, 0)
-                pipe.zremrangebyscore('w', 0, 0)
+        with timing("pushing zremrange w"):
+            with execute_block(self.rs) as pipes:
+                for w in delta_vocab:
+                    pipes[self.redis_of(w)].zremrangebyscore(to_key('w',w), 0, 0)
 
     @timed("push_local_state")
     def push_local_state(self):
@@ -152,7 +161,7 @@ class RedisLDAModelCache(LDAModelCache):
         local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum = self.lock_fork_delta_state()
 
         # Man, wouldn't it be awesome if python had more expressive callbacks?
-        (success, _) = self.push_local_state_redis(local_delta_topic_d, local_delta_topic_w, local_delta_topic_wsum)
+        (success, _) = self.push_local_state_redis(local_delta_topic_d, local_delta_topic_w)
 
         if success:
             self.pushes += 1
@@ -172,20 +181,17 @@ class RedisLDAModelCache(LDAModelCache):
         local_topic_w = defaultdict(lambda: defaultdict(int))
         local_topic_wsum = defaultdict(int)
 
-        # TODO: this part can be pipelined as well
         # Pull down the global state 
-        # XXX: TODO: this might need to be transactional
-        with transact_block(self.rs, transaction=True) as pipes:
-            # XXX: try shuffling the pipes to see if this still causes clobbering
-            random.shuffle(pipes)
-            # Remove everything with zero count to save memory
-            for pipe in pipes:
-                for zw, v in pipe.zrevrangebyscore('w', float('inf'), 1, withscores=True).execute()[0]:
-                    z,w = dt(zw)
-                    if w >= 0:
+        assert len(self.rs) == 1  # sorry for now only support single redii
+        with timing("pulling w state"):
+            # XXX: don't think this needs to be transactional because each w/zrevrange command is atomic
+            with transact_block(self.rs) as pipes:
+                for w in iter(self.v.to_word):
+                    pipes[self.redis_of(w)].zrevrangebyscore(to_key('w',w), float('inf'), 1, withscores=True)
+                for w, zvs in enumerate(pipes[0].execute()):  # pipe[0], this is why we assert above
+                    for (z,v) in zvs:
                         local_topic_w[int(z)][int(w)] = int(v)
-                    else:
-                        local_topic_wsum[int(z)] = int(v)
+                        local_topic_wsum[int(z)] += int(v)
 
         return local_topic_w, local_topic_wsum
 
@@ -196,8 +202,6 @@ class RedisLDAModelCache(LDAModelCache):
         # Push the local state first; not sure of the impact of this, thought it roughly doubles the number of push synchronizations
         # The delta re-apply logic below will actually take care of the inconsistencies this introduces
         self.push_local_state()
-
-        time.sleep(600) # just for fun
 
         (success, (local_topic_w, local_topic_wsum)) = self.pull_global_state_redis()
 
@@ -241,21 +245,25 @@ def dump_model(rs):
 
     doc_name = d['document'].split('/')[-1]
 
+    assert len(rs) == 1
+
     with gzip.open('MODEL_%s-%s-T%d-alpha%.3f-beta%.3f-effective_iter=%d.json.gz' % (d['model'], doc_name, d['topics'], d['alpha'], d['beta'], int(d['iterations'] / float(d['shards']))), 'w') as f:
         with transact_block(rs) as pipes:
-            for pipe in pipes:
-                # This is clever because it avoids sending the zeros over the wire
-                for zw,v in pipe.zrevrangebyscore('w', float('inf'), 1, withscores=True).execute()[0]:
-                    z,w = dt(zw)
-                    if z >=0 :
-                        d['w'][z][w] = int(v)
-                    else:
-                        pass # discard wsum for now
-                # get documents
+            w_keys = pipes[0].keys(to_key('w','*'))
 
-                for zd,v in pipe.zrevrangebyscore(('d', z), float('inf'), 1, withscores=True).execute()[0]:
-                    z,d = dt(zd)
-                    d['d'][z][d] = int(v)
+            for w_key in w_keys:
+                pipes[0].zrevrangebyscore(w_key, float('inf'), 1, withscores=True)
+            _, w = from_key(w_key)
+            for w, zvs in pipes[0].execute():  # pipe[0], this is why we assert above
+                for (z,v) in zvs:
+                    d['w'][int(z)][int(w)] = int(v)
+            d_keys = pipes[0].keys(to_key('d','*'))
+            for d_key in d_keys:
+                pipes[0].zrevrangebyscore(d_key, float('inf'), 1, withscores=True)
+            _, d = from_key(d_key)
+            for d, zvs in pipes[0].execute():  # pipe[0], this is why we assert above
+                for (z,v) in zvs:
+                    d['d'][int(z)][int(d)] = int(v)
 
 
         f.write(json.dumps(d))

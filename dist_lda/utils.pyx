@@ -1,9 +1,10 @@
 import sys
+from contextlib import contextmanager
+import time
 from collections import defaultdict
 
 def timed(name):
     def _timed(func): 
-        import time 
         """ Decorator @timed logs some timing info """ 
         def wrapper(*arg, **kwargs): 
             t1 = time.time() 
@@ -14,6 +15,15 @@ def timed(name):
         return wrapper
     return _timed
 
+# Cute with block for timining within a function
+# with timing:
+#    do some shit
+@contextmanager
+def timing(name):
+    t1 = time.time() 
+    yield None
+    t2 = time.time() 
+    sys.stderr.write('TIMED %s took %0.3f ms\n' % (name, (t2-t1)*1000.0)) 
 
 def with_retries(retries, name):
     """
