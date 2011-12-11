@@ -15,6 +15,7 @@ from lda_model import LDAModelCache
 # TODO: add the LDACache back to the LDAModel
 
 # NOTE: waffled on having monolithic or fine-grained keys; monolithic causes too much blocking
+# TODO: invert z->w to w->z and push one per word
 
 def to_key(a, b):
     return "%s/%s" % (str(a), str(b))
@@ -121,7 +122,7 @@ class RedisLDAModelCache(LDAModelCache):
             merge_defaultdict_2(self.delta_topic_w, local_delta_topic_w)
             merge_defaultdict_1(self.delta_topic_wsum, local_delta_topic_wsum)
 
-    @with_retries(10, "push_local_state_redis")
+    @with_retries(10, "sync_state_redis")
     def push_local_state_redis(self, local_delta_topic_d, local_delta_topic_w):
         """
         Push local state deltas transactionally (important to maintain state / bc other consumers might make pull requests)
