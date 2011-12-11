@@ -141,8 +141,8 @@ class RedisLDAModelCache(LDAModelCache):
             sys.stderr.write('[%s] exception on push_w\n' % e)
             # Return our forked copy if there was a problem
             with self.topic_lock:
-                merge_defaultdict_2(self.delta_topic_w, local_delta_topic_w)
-                merge_defaultdict_1(self.delta_topic_wsum, local_delta_topic_wsum)
+                merge_defaultdict_2(self.delta_topic_w, local_delta_topic_w, check=False)
+                merge_defaultdict_1(self.delta_topic_wsum, local_delta_topic_wsum, check=False)
         else:
             with timing("update local w state"):
                 # Inform the running model about the new state
