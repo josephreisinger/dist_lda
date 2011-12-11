@@ -121,9 +121,7 @@ class DistributedLDA(Sampler):
         self.model.dump_topics(iter)
         self.resamples += 1 
         sys.stderr.write('|| DONE shard=%d iter=%d resamples=%d syncs=%d (%d swaps %.4f%%)\n' % (self.options.this_shard, iter, self.resamples, self.model.syncs, self.swaps, 100 * self.swaps / float(self.attempts)))
-        sys.stderr.write('sleeping```````````````````````````````````````\n')
-        time.sleep(2)  
-        sys.stderr.write('done sleeping//////////////////////////////////////\n')
+        time.sleep(2)  # probably take this out
 
     @timed("initialize")
     def initialize(self):
