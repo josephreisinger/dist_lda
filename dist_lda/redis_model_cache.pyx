@@ -83,7 +83,6 @@ class RedisLDAModelCache(LDAModelCache):
                 for d,v in local_delta_topic_d.iteritems():
                     for z, delta in v.iteritems():
                         pipes[self.redis_of(d)].zincrby(to_key('d',d), z, delta)
-            with execute_block(self.rs, transaction=True) as pipes:
                 for doc in self.documents:
                     d = doc.id
                     pipes[self.redis_of(d)].zremrangebyscore(to_key('d',d), 0, 0)
@@ -113,6 +112,11 @@ class RedisLDAModelCache(LDAModelCache):
                 # Reset the deltas
                 self.delta_topic_w = defaultdict(lambda: defaultdict(int))
                 self.delta_topic_wsum = defaultdict(int)
+
+            # Pull w state back down
+            local_topic_w = defaultdict(lambda: defaultdict(int))
+            local_topic_wsum = defaultdict(int)
+
             # Push the state to the redis
             # Update w topic state
             with timing("increment w (Dropped zremrange for now)"):
@@ -123,13 +127,9 @@ class RedisLDAModelCache(LDAModelCache):
                                 # TODO: this actually returns the new value; is there some way we can use this?
                                 pipes[self.redis_of(w)].zincrby(to_key('w',w), z, delta)
                         # pipes[self.redis_of(w)].zremrangebyscore(to_key('w',w), 0, 0)
+                        pipes[self.redis_of(w)].zremrangebyscore(to_key('w',w), 0, 0)
+                    pipes[0].execute()
 
-            # Pull w state back down
-            local_topic_w = defaultdict(lambda: defaultdict(int))
-            local_topic_wsum = defaultdict(int)
-
-            with timing("pull w state"):
-                with transact_block(self.rs) as pipes:
                     for w in iter(self.v.to_word):
                         pipes[self.redis_of(w)].zrevrangebyscore(to_key('w',w), float('inf'), 1, withscores=True)
                     # XXX: pipe[0]
