@@ -39,14 +39,14 @@ class LDAModelCache(object):
         # XXX: only call this in the lock
         d.assignment[i] = z
 
-        self.topic_d[z][d.id] += 1
-        self.topic_w[z][w] += 1
+        self.topic_d[d.id][z] += 1
+        self.topic_w[w][z] += 1
         self.topic_wsum[z] += 1
             
         # shouldn't increment the deltas if we've restarted from journaled state
         if delta:
-            self.delta_topic_d[z][d.id] += 1
-            self.delta_topic_w[z][w] += 1
+            self.delta_topic_d[d.id][z] += 1
+            self.delta_topic_w[w][z] += 1
             self.delta_topic_wsum[z] += 1
 
     def move_d_w(self, w, d, i, oldz, newz):
@@ -55,20 +55,20 @@ class LDAModelCache(object):
         """
         # XXX: should only call this inside the lock
         if newz != oldz:
-            self.topic_d[oldz][d.id] += -1
-            self.topic_w[oldz][w] += -1
+            self.topic_d[d.id][oldz] += -1
+            self.topic_w[w][oldz] += -1
             self.topic_wsum[oldz] += -1
 
-            self.topic_d[newz][d.id] += 1
-            self.topic_w[newz][w] += 1
+            self.topic_d[d.id][newz] += 1
+            self.topic_w[w][newz] += 1
             self.topic_wsum[newz] += 1
 
-            self.delta_topic_d[oldz][d.id] += -1
-            self.delta_topic_w[oldz][w] += -1
+            self.delta_topic_d[d.id][oldz] += -1
+            self.delta_topic_w[w][oldz] += -1
             self.delta_topic_wsum[oldz] += -1
 
-            self.delta_topic_d[newz][d.id] += 1
-            self.delta_topic_w[newz][w] += 1
+            self.delta_topic_d[d.id][newz] += 1
+            self.delta_topic_w[w][newz] += 1
             self.delta_topic_wsum[newz] += 1
 
             d.assignment[i] = newz

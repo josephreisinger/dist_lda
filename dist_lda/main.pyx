@@ -88,18 +88,18 @@ class DistributedLDA(Sampler):
                 for tz in range(topics):
                     # Obviously, vast majority of time is spent in this block
                     if tz == oldz:
-                        assert m.topic_w[tz][w] > 0
+                        assert m.topic_w[w][tz] > 0
                         s = addLog(s, \
-                                log(self.beta + m.topic_w[tz][w] - 1) \
+                                log(self.beta + m.topic_w[w][tz] - 1) \
                                 - log(betaV + m.topic_wsum[tz] - 1) \
-                                + log(self.alpha + m.topic_d[tz][did] - 1) \
+                                + log(self.alpha + m.topic_d[did][tz] - 1) \
                                 - dndm1)
                     else:
                         assert m.topic_w[tz][w] >= 0
                         s = addLog(s, \
-                                log(self.beta + m.topic_w[tz][w]) \
+                                log(self.beta + m.topic_w[w][tz]) \
                                 - log(betaV + m.topic_wsum[tz]) \
-                                + log(self.alpha + m.topic_d[tz][did]) \
+                                + log(self.alpha + m.topic_d[did][tz]) \
                                 - dnd)
                     cum_lp[tz] = s
 
