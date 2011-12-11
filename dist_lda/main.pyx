@@ -1,4 +1,5 @@
 import sys
+import time
 import random
 from collections import defaultdict
 from libc.math cimport exp, log
@@ -95,7 +96,7 @@ class DistributedLDA(Sampler):
                                 + log(self.alpha + m.topic_d[did][tz] - 1) \
                                 - dndm1)
                     else:
-                        assert m.topic_w[tz][w] >= 0
+                        assert m.topic_w[w][tz] >= 0
                         s = addLog(s, \
                                 log(self.beta + m.topic_w[w][tz]) \
                                 - log(betaV + m.topic_wsum[tz]) \
@@ -117,29 +118,25 @@ class DistributedLDA(Sampler):
             self.resample_document(d)
         self.model.finalize_iteration(iter)
         # Print out the topics
-        for z in range(self.topics):
-            sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.model.topic_to_string(self.model.topic_w[z])])))
+        self.model.dump_topics(iter)
         self.resamples += 1 
-        sys.stderr.write('|| DONE shard=%d iter=%d resamples=%d pulls=%d pushes=%d (%d swaps %.4f%%)\n' % (self.options.this_shard, iter, self.resamples, self.model.pulls, self.model.pushes, self.swaps, 100 * self.swaps / float(self.attempts)))
+        sys.stderr.write('|| DONE shard=%d iter=%d resamples=%d syncs=%d (%d swaps %.4f%%)\n' % (self.options.this_shard, iter, self.resamples, self.model.syncs, self.swaps, 100 * self.swaps / float(self.attempts)))
+        sys.stderr.write('sleeping```````````````````````````````````````\n')
+        time.sleep(2)  
+        sys.stderr.write('done sleeping//////////////////////////////////////\n')
 
     @timed("initialize")
     def initialize(self):
         sys.stderr.write('Loading document shard %d / %d...\n' % (self.options.this_shard, self.options.shards))
         processed = 0
 
-        disk_journal = self.model.try_load_disk_journal()
-
         for line_no, line in enumerate(open_or_gz(self.options.document)):
             # Process every line because we need to build the vocabulary
             d = Document(line=line, vocab=self.model.v)
             if line_no % self.options.shards == self.options.this_shard:
                 d.build_rep()
-                if disk_journal:
-                    assert len(disk_journal[processed]) == len(d.dense)
-                    self.model.insert_new_document(d, delta=False, assignments=disk_journal[processed])
-                else:
-                    self.model.insert_new_document(d, delta=True, assignments=[random.randint(0, self.topics) for x in d.dense])
-                    self.resample_document(d)
+                self.model.insert_new_document(d, delta=True, assignments=[random.randint(0, self.topics) for x in d.dense])
+                self.resample_document(d)
                 processed += 1
                 if processed % 1000 == 0:
                     sys.stderr.write('... loaded %d documents [%s]\n' % (processed, d.name))

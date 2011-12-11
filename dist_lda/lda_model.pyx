@@ -1,3 +1,4 @@
+import sys
 import heapq
 from collections import defaultdict
 from document import Vocabulary
@@ -73,13 +74,16 @@ class LDAModelCache(object):
 
             d.assignment[i] = newz
 
-    def topic_to_string(self, topic, max_length=20):
+    def topic_to_string(self, z, max_length=20):
         result = []
-        for w,c in topic.iteritems():
+        for w,v in self.topic_w.iteritems():
             if len(result) > max_length:
-                heapq.heappushpop(result, (c,self.v.rev(w)))
+                heapq.heappushpop(result, (v[z],self.v.rev(w)))
             else:
-                heapq.heappush(result, (c,self.v.rev(w)))
+                heapq.heappush(result, (v[z],self.v.rev(w)))
         return heapq.nlargest(max_length, result)
 
+    def dump_topics(self, iter):
+        for z in range(self.topics):
+            sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.topic_to_string(z)])))
 
