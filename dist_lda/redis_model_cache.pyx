@@ -14,9 +14,6 @@ from lda_model import LDAModelCache
 # TODO: abstract out the redis cache part into a generic trait
 # TODO: add the LDACache back to the LDAModel
 
-# NOTE: waffled on having monolithic or fine-grained keys; monolithic causes too much blocking
-# TODO: invert z->w to w->z and push one per word
-
 def to_key(a, b):
     return "%s/%s" % (str(a), str(b))
 def from_key(k):
@@ -103,57 +100,59 @@ class RedisLDAModelCache(LDAModelCache):
         # TODO: this logic leads to large transient memory spikes in each redis shard (say 3-4x baseline mem usage), when
         #       client shards pile on. I haven't narrowed it down to whether it is the zrevrangebyscore or hgetall
         #       but neither seem to be particularly likely candidates; 
-        try:
-            # Fork the w state
-            with self.topic_lock:
-                local_delta_topic_w = copy_sparse_defaultdict_2(self.delta_topic_w)
-                local_delta_topic_wsum = copy_sparse_defaultdict_1(self.delta_topic_wsum)
-
-                # Reset the deltas
-                self.delta_topic_w = defaultdict(lambda: defaultdict(int))
-                self.delta_topic_wsum = defaultdict(int)
-
-            # Pull w state back down
-            local_topic_w = defaultdict(lambda: defaultdict(int))
-            local_topic_wsum = defaultdict(int)
-
-            # Push the state to the redis
-            # Update w topic state
-            with timing("increment w (Dropped zremrange for now)"):
-                with execute_block(self.rs, transaction=True) as pipes:
-                    for w in iter(self.v.to_word):
-                        for z, delta in local_delta_topic_w[w].iteritems():
-                            if delta != 0:
-                                # TODO: this actually returns the new value; is there some way we can use this?
-                                pipes[self.redis_of(w)].zincrby(to_key('w',w), z, delta)
-                        # pipes[self.redis_of(w)].zremrangebyscore(to_key('w',w), 0, 0)
-                        pipes[self.redis_of(w)].zremrangebyscore(to_key('w',w), 0, 0)
-                    pipes[0].execute()
-
-                    for w in iter(self.v.to_word):
-                        pipes[self.redis_of(w)].zrevrangebyscore(to_key('w',w), float('inf'), 1, withscores=True)
-                    # XXX: pipe[0]
-                    for (w,zv) in izip(iter(self.v.to_word), pipes[0].execute()):
-                        for z, v in zv:
-                            local_topic_w[int(w)][int(z)] = int(v)
-                            local_topic_wsum[int(z)] += int(v)
-        except Exception, e:
-            sys.stderr.write('[%s] exception on push_w\n' % e)
-            # Return our forked copy if there was a problem
-            with self.topic_lock:
-                merge_defaultdict_2(self.delta_topic_w, local_delta_topic_w, check=False)
-                merge_defaultdict_1(self.delta_topic_wsum, local_delta_topic_wsum, check=False)
-        else:
-            with timing("update local w state"):
-                # Inform the running model about the new state
-                # But, by this point we may actually be behind our own local state, so lock the deltas and apply them again
-                # (this is the price we pay for not locking over the entire pull)
+        w_keys = self.v.to_word.keys()
+        random.shuffle(w_keys)
+        for ws in grouper(100, w_keys):
+            # sys.stderr.write("ws=%r\n" % (ws,))
+            ws = [w for w in ws if w]
+            try:
+                # Fork the w state
                 with self.topic_lock:
-                    # self.topic_w now has reference to local_topic_w)
-                    self.topic_w = merge_defaultdict_2(local_topic_w, self.delta_topic_w)
-                    self.topic_wsum = merge_defaultdict_1(local_topic_wsum, self.delta_topic_wsum)
+                    local_delta_topic_w = defaultdict(lambda: defaultdict(int))
+                    for w in ws:
+                        local_delta_topic_w[w] = copy_sparse_defaultdict_1(self.delta_topic_w[w])
+                        # Reset the deltas
+                        self.delta_topic_w[w] = defaultdict(int)
 
-                self.syncs += 1
+                # Pull w state back down
+                local_topic_w = defaultdict(lambda: defaultdict(int))
+
+                # Push the state to the redis
+                # Update w topic state
+                with timing("increment w (100 chunk)"):
+                    with transact_block(self.rs, transaction=True) as pipes:
+                        for w in ws:
+                            for z, delta in local_delta_topic_w[w].iteritems():
+                                if delta != 0:
+                                    # TODO: this actually returns the new value; is there some way we can use this?
+                                    pipes[self.redis_of(w)].zincrby(to_key('w',w), z, delta)
+                            pipes[self.redis_of(w)].zremrangebyscore(to_key('w',w), 0, 0)
+                        pipes[0].execute()
+
+                        for w in ws:
+                            pipes[self.redis_of(w)].zrevrangebyscore(to_key('w',w), float('inf'), 1, withscores=True)
+                        for w, zv in izip(ws, pipes[0].execute()):
+                            for z,v in zv:
+                                local_topic_w[int(w)][int(z)] = int(v)
+            except Exception, e:
+                sys.stderr.write('XXX [%s] exception on push_w\n' % e)
+                # Return our forked copy if there was a problem
+                with self.topic_lock:
+                    for w in ws:
+                        merge_defaultdict_1(self.delta_topic_w[w], local_delta_topic_w[w], check=False)
+            else:
+                with timing("update local w state"):
+                    # Inform the running model about the new state
+                    # But, by this point we may actually be behind our own local state, so lock the deltas and apply them again
+                    # (this is the price we pay for not locking over the entire pull)
+                    with self.topic_lock:
+                        for w in ws:
+                            # self.topic_w now has reference to local_topic_w)
+                            self.topic_w[w] = merge_defaultdict_1(local_topic_w[w], self.delta_topic_w[w])
+                        for z in xrange(self.topics):
+                            self.topic_wsum[z] = sum([self.topic_w[w][z] for w in w_keys])
+
+                    self.syncs += 1
 
     def finalize_iteration(self, iter):
         if iter == 0:

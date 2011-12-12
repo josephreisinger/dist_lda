@@ -1,6 +1,7 @@
 import sys
 from contextlib import contextmanager
 import time
+from itertools import izip_longest
 from collections import defaultdict
 
 def timed(name):
@@ -53,6 +54,10 @@ def open_or_gz(f):
     else:
         return open(f)
 
+def grouper(n, iterable, fillvalue=None):
+    "grouper(3, 'ABCDEFG', 'x') --> ABC DEF Gxx"
+    args = [iter(iterable)] * n
+    return izip_longest(fillvalue=fillvalue, *args)
 
 
 def copy_sparse_defaultdict_1(dd):

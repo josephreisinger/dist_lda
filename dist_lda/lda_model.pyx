@@ -19,7 +19,6 @@ class LDAModelCache(object):
         # Also track the deltas of the stuff we want to sync
         self.delta_topic_d = defaultdict(lambda: defaultdict(int))
         self.delta_topic_w = defaultdict(lambda: defaultdict(int))
-        self.delta_topic_wsum = defaultdict(int)
 
         # Document state
         self.documents = []
@@ -48,7 +47,6 @@ class LDAModelCache(object):
         if delta:
             self.delta_topic_d[d.id][z] += 1
             self.delta_topic_w[w][z] += 1
-            self.delta_topic_wsum[z] += 1
 
     def move_d_w(self, w, d, i, oldz, newz):
         """
@@ -66,11 +64,9 @@ class LDAModelCache(object):
 
             self.delta_topic_d[d.id][oldz] += -1
             self.delta_topic_w[w][oldz] += -1
-            self.delta_topic_wsum[oldz] += -1
 
             self.delta_topic_d[d.id][newz] += 1
             self.delta_topic_w[w][newz] += 1
-            self.delta_topic_wsum[newz] += 1
 
             d.assignment[i] = newz
 
