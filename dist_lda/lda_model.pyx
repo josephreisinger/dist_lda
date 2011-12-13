@@ -70,7 +70,7 @@ class LDAModelCache(object):
 
             d.assignment[i] = newz
 
-    def topic_to_string(self, z, max_length=20):
+    def topics_to_string(self, z, max_length=20):
         result = []
         for w,v in self.topic_w.iteritems():
             if len(result) > max_length:
