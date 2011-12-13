@@ -149,8 +149,12 @@ class RedisLDAModelCache(LDAModelCache):
                         for w in ws:
                             # self.topic_w now has reference to local_topic_w)
                             self.topic_w[w] = merge_defaultdict_1(local_topic_w[w], self.delta_topic_w[w])
-                        for z in xrange(self.topics):
-                            self.topic_wsum[z] = sum([self.topic_w[w][z] for w in w_keys])
+                        # XXX: this part is slooow// probably better way to do it is to fork local w state and compare to new local
+                        # rebuild wsum
+                        self.topic_wsum = defaultdict(int)
+                        for w,zv in self.topic_w.iteritems():
+                            for z,v in zv.iteritems():
+                                self.topic_wsum[z] += self.topic_w[w][z]
 
                     self.syncs += 1
 
