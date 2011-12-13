@@ -84,10 +84,10 @@ class RedisLDAModelCache(LDAModelCache):
                     d = doc.id
                     pipes[self.redis_of(d)].zremrangebyscore(to_key('d',d), 0, 0)
         except Exception, e:
-            sys.stderr.write('[%s] exception on push_d\n')
+            sys.stderr.write('[%s] exception on push_d\n' % e)
             # Return our forked copy if there was a problem
             with self.topic_lock:
-                merge_defaultdict_2(self.delta_topic_d, local_delta_topic_d)
+                merge_defaultdict_2(self.delta_topic_d, local_delta_topic_d, check=False)
 
     def sync_state(self):
         # w and d don't need to be in the same transact block ; have one key per word for even more fine-grained parallelism
