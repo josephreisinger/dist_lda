@@ -158,7 +158,7 @@ class RedisLDAModelCache(LDAModelCache):
 
                     self.syncs += 1
 
-    @retries(10, "finalize_iteration")
+    @with_retries(10, "finalize_iteration")
     def finalize_iteration(self, iter):
         if iter == 0:
             with execute_single(self.rs[0], transaction=False) as pipe:
