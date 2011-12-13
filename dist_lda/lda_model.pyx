@@ -2,6 +2,7 @@ import sys
 import heapq
 from collections import defaultdict
 from document import Vocabulary
+from utils import timed
 
 class LDAModelCache(object):
     """
@@ -70,16 +71,18 @@ class LDAModelCache(object):
 
             d.assignment[i] = newz
 
-    def topic_to_string(self, z, max_length=20):
-        result = []
-        for w,v in self.topic_w.iteritems():
-            if len(result) > max_length:
-                heapq.heappushpop(result, (v[z],self.v.rev(w)))
-            else:
-                heapq.heappush(result, (v[z],self.v.rev(w)))
-        return heapq.nlargest(max_length, result)
+    def head_words(self, max_length=20):
+        result = defaultdict(list)
+        for w,zv in self.topic_w.iteritems():
+            for z,v in zv.iteritems():
+                if len(result[z]) > max_length:
+                    heapq.heappushpop(result[z], (v,self.v.rev(w)))
+                else:
+                    heapq.heappush(result[z], (v,self.v.rev(w)))
+        return {z:heapq.nlargest(max_length, result[z]) for z in iter(result)}
 
+    @timed("dump_topics")
     def dump_topics(self, iter):
-        for z in range(self.topics):
-            sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in self.topic_to_string(z)])))
+        for z, heads in self.head_words().iteritems():
+            sys.stderr.write('I: %d [TOPIC %d] :: %s\n' % (iter, z, ' '.join(['[%s]:%d' % (w,c) for c,w in heads])))
 
