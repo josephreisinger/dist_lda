@@ -77,11 +77,11 @@ def copy_sparse_defaultdict_2(dd):
 # Will modify first argument
 def merge_defaultdict_1(result, x, check=True):
     for z, c in x.iteritems():
-        if check:
-            if result[z] + c < 0:
-                sys.stderr.write('RZ=%d c=%d\n' % (result[z], c))
-            assert result[z] >= 0  # merge caused negative :(
         result[z] += c
+        if check:
+            if result[z] < 0:
+                sys.stderr.write('RZ=%d c=%d\n' % (result[z]-c, c))
+            assert result[z] >= 0  # merge caused negative :(
     return result
 
 def merge_defaultdict_2(result, x, check=True):

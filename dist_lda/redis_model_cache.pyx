@@ -42,6 +42,8 @@ class RedisLDAModelCache(LDAModelCache):
 
         # Stat counters
         self.syncs = 0
+        self.complete_syncs = 0
+        self.total_observed_weight = 0
         self.resample_count = 0
 
     def post_initialize(self):
@@ -61,6 +63,11 @@ class RedisLDAModelCache(LDAModelCache):
 
     def redis_of(self, thing):
         return hash(thing) % len(self.rs)
+
+    def sync_state(self):
+        # w and d don't need to be in the same transact block ; have one key per word for even more fine-grained parallelism
+        self.sync_d()
+        self.sync_w()
 
     @timed("sync_d")
     def sync_d(self):
@@ -84,15 +91,10 @@ class RedisLDAModelCache(LDAModelCache):
                     d = doc.id
                     pipes[self.redis_of(d)].zremrangebyscore(to_key('d',d), 0, 0)
         except Exception, e:
-            sys.stderr.write('[%s] exception on push_d\n' % e)
+            sys.stderr.write('XXX [%s] exception on push_d\n' % e)
             # Return our forked copy if there was a problem
             with self.topic_lock:
                 merge_defaultdict_2(self.delta_topic_d, local_delta_topic_d, check=False)
-
-    def sync_state(self):
-        # w and d don't need to be in the same transact block ; have one key per word for even more fine-grained parallelism
-        self.sync_d()
-        self.sync_w()
 
     @timed("sync_w")
     def sync_w(self):
@@ -102,7 +104,8 @@ class RedisLDAModelCache(LDAModelCache):
         #       but neither seem to be particularly likely candidates; 
         w_keys = self.v.to_word.keys()
         random.shuffle(w_keys)
-        for ws in grouper(100, w_keys):
+        observed_weight = 0
+        for ws in grouper(5000, w_keys):
             # sys.stderr.write("ws=%r\n" % (ws,))
             ws = [w for w in ws if w]
             try:
@@ -119,8 +122,8 @@ class RedisLDAModelCache(LDAModelCache):
 
                 # Push the state to the redis
                 # Update w topic state
-                with timing("increment w (100 chunk)"):
-                    with transact_block(self.rs, transaction=True) as pipes:
+                with timing("increment w (5000 chunk)"):
+                    with transact_block(self.rs) as pipes:
                         for w in ws:
                             for z, delta in local_delta_topic_w[w].iteritems():
                                 if delta != 0:
@@ -155,8 +158,11 @@ class RedisLDAModelCache(LDAModelCache):
                         for w,zv in self.topic_w.iteritems():
                             for z,v in zv.iteritems():
                                 self.topic_wsum[z] += self.topic_w[w][z]
+                                observed_weight += self.topic_w[w][z]
 
                     self.syncs += 1
+        self.complete_syncs += 1
+        self.total_observed_weight = observed_weight
 
     @with_retries(10, "finalize_iteration")
     def finalize_iteration(self, iter):

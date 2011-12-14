@@ -120,7 +120,7 @@ class DistributedLDA(Sampler):
         # Print out the topics
         self.model.dump_topics(iter)
         self.resamples += 1 
-        sys.stderr.write('|| DONE shard=%d iter=%d resamples=%d syncs=%d (%d swaps %.4f%%)\n' % (self.options.this_shard, iter, self.resamples, self.model.syncs, self.swaps, 100 * self.swaps / float(self.attempts)))
+        sys.stderr.write('|| DONE shard=%d iter=%d resamples=%d syncs=%d (%d) observed_weight=%d (%d swaps %.4f%%)\n' % (self.options.this_shard, iter, self.resamples, self.model.complete_syncs, self.model.syncs, self.model.total_observed_weight, self.swaps, 100 * self.swaps / float(self.attempts)))
         time.sleep(2)  # probably take this out
 
     @timed("initialize")
