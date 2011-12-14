@@ -123,7 +123,7 @@ class RedisLDAModelCache(LDAModelCache):
                 # Push the state to the redis
                 # Update w topic state
                 with timing("increment w (5000 chunk)"):
-                    with transact_block(self.rs) as pipes:
+                    with transact_block(self.rs, transaction=True) as pipes:
                         for w in ws:
                             for z, delta in local_delta_topic_w[w].iteritems():
                                 if delta != 0:
