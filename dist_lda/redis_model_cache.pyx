@@ -123,6 +123,7 @@ class RedisLDAModelCache(LDAModelCache):
                 # Push the state to the redis
                 # Update w topic state
                 with timing("increment w (5000 chunk)"):
+                    # XXX: this has to be a transaction or we'll get inconsistent counts
                     with transact_block(self.rs, transaction=True) as pipes:
                         for w in ws:
                             for z, delta in local_delta_topic_w[w].iteritems():
@@ -203,14 +204,14 @@ def dump_model(rs):
             for w_key in w_keys:
                 pipes[0].zrevrangebyscore(w_key, float('inf'), 1, withscores=True)
             _, w = from_key(w_key)
-            for w, zvs in pipes[0].execute():  # pipe[0], this is why we assert above
+            for w, zvs in izip(w_keys, pipes[0].execute()):  # pipe[0], this is why we assert above
                 for (z,v) in zvs:
                     d['w'][int(z)][int(w)] = int(v)
             d_keys = pipes[0].keys(to_key('d','*'))
             for d_key in d_keys:
                 pipes[0].zrevrangebyscore(d_key, float('inf'), 1, withscores=True)
             _, d = from_key(d_key)
-            for d, zvs in pipes[0].execute():  # pipe[0], this is why we assert above
+            for d, zvs in izip(d_keys, pipes[0].execute()):  # pipe[0], this is why we assert above
                 for (z,v) in zvs:
                     d['d'][int(z)][int(d)] = int(v)
 
