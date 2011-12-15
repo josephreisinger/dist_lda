@@ -16,14 +16,13 @@ class Vocabulary:
 
 # Base class holding a document and assignment vecto
 class Document:
-    def __init__(self, name="NULL", line=None, vocab=None):
-        self.name = name
+    def __init__(self, line=None, vocab=None):
         assert vocab is not None
         self.vocab = vocab
 
         self.name, self.word_counts = self.parse_lda_line(line)
 
-        self.id = vocab.get(name)
+        self.id = vocab.get(self.name)
 
     def build_rep(self):
         self.dense = [w for w,c in self.word_counts for cc in range(c)]
