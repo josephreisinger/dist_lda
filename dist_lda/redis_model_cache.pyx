@@ -126,7 +126,7 @@ class RedisLDAModelCache(LDAModelCache):
 
                 # Push the state to the redis
                 # Update w topic state
-                with timing("increment w (%d chunk)" % self.options.sync_chunk_size):
+                with timing("increment w (%d chunk) skip zremrange" % self.options.sync_chunk_size):
                     # XXX: this has to be a transaction or we'll get inconsistent counts
                     with transact_block(self.rs, transaction=True) as pipes:
                         for w in ws:
@@ -134,7 +134,7 @@ class RedisLDAModelCache(LDAModelCache):
                                 if delta != 0:
                                     # TODO: this actually returns the new value; is there some way we can use this?
                                     pipes[self.redis_of(w)].zincrby(to_key('w',w), z, delta)
-                            pipes[self.redis_of(w)].zremrangebyscore(to_key('w',w), 0, 0)
+                            # pipes[self.redis_of(w)].zremrangebyscore(to_key('w',w), 0, 0)
                         pipes[0].execute()
 
                         for w in ws:
@@ -157,17 +157,13 @@ class RedisLDAModelCache(LDAModelCache):
                         for w in ws:
                             self.topic_w[w] = merge_defaultdict_1(local_topic_w[w], self.delta_topic_w[w])
 
-                    # More fine-grained locking
-                    # XXX: this part is slooow// probably better way to do it is to fork local w state and compare to new local
-                    # rebuild wsum
-                    topic_wsum = defaultdict(int)
-                    for w,zv in topic_w.iteritems():
-                        for z,v in zv.iteritems():
-                            topic_wsum[z] += self.topic_w[w][z]
-                            observed_weight += self.topic_w[w][z]
-
-                    with self.topic_lock:
-                        self.topic_wsum = topic_wsum
+                        # XXX: this part is slooow// probably better way to do it is to fork local w state and compare to new local
+                        # rebuild wsum
+                        self.topic_wsum = defaultdict(int)
+                        for w,zv in topic_w.iteritems():
+                            for z,v in zv.iteritems():
+                                self.topic_wsum[z] += self.topic_w[w][z]
+                                observed_weight += self.topic_w[w][z]
 
                     self.syncs += 1
         self.complete_syncs += 1
