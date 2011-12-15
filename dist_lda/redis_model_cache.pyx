@@ -110,12 +110,13 @@ class RedisLDAModelCache(LDAModelCache):
             ws = [w for w in ws if w]
             try:
                 # Fork the w state
-                with self.topic_lock:
-                    local_delta_topic_w = defaultdict(lambda: defaultdict(int))
-                    for w in ws:
-                        local_delta_topic_w[w] = copy_sparse_defaultdict_1(self.delta_topic_w[w])
-                        # Reset the deltas
-                        self.delta_topic_w[w] = defaultdict(int)
+                with timing("fork w state"):
+                    with self.topic_lock:
+                        local_delta_topic_w = defaultdict(lambda: defaultdict(int))
+                        for w in ws:
+                            local_delta_topic_w[w] = copy_sparse_defaultdict_1(self.delta_topic_w[w])
+                            # Reset the deltas
+                            self.delta_topic_w[w] = defaultdict(int)
 
                 # Pull w state back down
                 local_topic_w = defaultdict(lambda: defaultdict(int))
