@@ -18,6 +18,8 @@ if __name__ == '__main__':
     parser.add_argument("--shards", type=int, default=1, help="Shard the document file into this many") 
     parser.add_argument("--this_shard", type=int, default=0, help="What shard number am I")
 
+    parser.add_argument("--sync_chunk_size", type=int, default=500, help="How many w to sync at once")
+
     options = parser.parse_args(sys.argv[1:]) 
 
     sys.stderr.write("XXX: currently assuming unique docnames\n")

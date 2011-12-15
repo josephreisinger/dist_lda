@@ -46,6 +46,9 @@ class RedisLDAModelCache(LDAModelCache):
         self.total_observed_weight = 0
         self.resample_count = 0
 
+        # Construct a seed from the shard id and time
+        random.seed((options.this_shard, time.time()))
+
     def post_initialize(self):
         """
         Start a thread for synchronizing state with the redis
@@ -105,7 +108,7 @@ class RedisLDAModelCache(LDAModelCache):
         w_keys = self.v.to_word.keys()
         random.shuffle(w_keys)
         observed_weight = 0
-        for ws in grouper(5000, w_keys):
+        for ws in grouper(self.options.sync_chunk_size, w_keys):
             # sys.stderr.write("ws=%r\n" % (ws,))
             ws = [w for w in ws if w]
             try:
@@ -122,7 +125,7 @@ class RedisLDAModelCache(LDAModelCache):
 
                 # Push the state to the redis
                 # Update w topic state
-                with timing("increment w (5000 chunk)"):
+                with timing("increment w (%d chunk)" % self.options.sync_chunk_size):
                     # XXX: this has to be a transaction or we'll get inconsistent counts
                     with transact_block(self.rs, transaction=True) as pipes:
                         for w in ws:
@@ -199,22 +202,26 @@ def dump_model(rs):
 
     with gzip.open('MODEL_%s-%s-T%d-alpha%.3f-beta%.3f-effective_iter=%d.json.gz' % (d['model'], doc_name, d['topics'], d['alpha'], d['beta'], int(d['iterations'] / float(d['shards']))), 'w') as f:
         with transact_block(rs) as pipes:
-            w_keys = pipes[0].keys(to_key('w','*'))
+            w_keys = pipes[0].keys(to_key('w','*')).execute()[0]
+            sys.stderr.write('w_keys=%d\n' % len(w_keys))
 
             for w_key in w_keys:
                 pipes[0].zrevrangebyscore(w_key, float('inf'), 1, withscores=True)
-            _, w = from_key(w_key)
-            for w, zvs in izip(w_keys, pipes[0].execute()):  # pipe[0], this is why we assert above
+            for w_key, zvs in izip(w_keys, pipes[0].execute()):  # pipe[0], this is why we assert above
+                _, w = from_key(w_key)
                 for (z,v) in zvs:
                     d['w'][int(z)][int(w)] = int(v)
-            d_keys = pipes[0].keys(to_key('d','*'))
+            d_keys = pipes[0].keys(to_key('d','*')).execute()[0]
+            sys.stderr.write('d_keys=%d\n' % len(d_keys))
+            print d_keys
             for d_key in d_keys:
                 pipes[0].zrevrangebyscore(d_key, float('inf'), 1, withscores=True)
-            _, d = from_key(d_key)
-            for d, zvs in izip(d_keys, pipes[0].execute()):  # pipe[0], this is why we assert above
+            for d_key, zvs in izip(d_keys, pipes[0].execute()):  # pipe[0], this is why we assert above
+                _, doc = from_key(d_key)
                 for (z,v) in zvs:
-                    d['d'][int(z)][int(d)] = int(v)
+                    d['d'][int(z)][int(doc)] = int(v)
 
 
         f.write(json.dumps(d))
 
+    

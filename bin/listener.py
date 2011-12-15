@@ -16,7 +16,6 @@ if __name__ == '__main__':
 
     current_iter = None
     while True:
-        sleep(options.poll_interval)
         shards = rs[0].get('shards')
         iter = rs[0].get('iterations')
 
@@ -28,6 +27,10 @@ if __name__ == '__main__':
         shards = int(shards)
 
         if not current_iter or (iter - current_iter) >= options.write_every*shards:
+            sys.stderr.write("dumping model iter=%d\n" % iter)
             current_iter = iter
             dump_model(rs)
+        else:
+            sys.stderr.write("skip iter=%d\n" % iter)
 
+        sleep(options.poll_interval)
