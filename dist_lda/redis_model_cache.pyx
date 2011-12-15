@@ -113,12 +113,13 @@ class RedisLDAModelCache(LDAModelCache):
             ws = [w for w in ws if w]
             try:
                 # Fork the w state
-                with self.topic_lock:
-                    local_delta_topic_w = defaultdict(lambda: defaultdict(int))
-                    for w in ws:
-                        local_delta_topic_w[w] = copy_sparse_defaultdict_1(self.delta_topic_w[w])
-                        # Reset the deltas
-                        self.delta_topic_w[w] = defaultdict(int)
+                with timing("fork w state"):
+                    with self.topic_lock:
+                        local_delta_topic_w = defaultdict(lambda: defaultdict(int))
+                        for w in ws:
+                            local_delta_topic_w[w] = copy_sparse_defaultdict_1(self.delta_topic_w[w])
+                            # Reset the deltas
+                            self.delta_topic_w[w] = defaultdict(int)
 
                 # Pull w state back down
                 local_topic_w = defaultdict(lambda: defaultdict(int))
@@ -154,15 +155,19 @@ class RedisLDAModelCache(LDAModelCache):
                     # (this is the price we pay for not locking over the entire pull)
                     with self.topic_lock:
                         for w in ws:
-                            # self.topic_w now has reference to local_topic_w)
                             self.topic_w[w] = merge_defaultdict_1(local_topic_w[w], self.delta_topic_w[w])
-                        # XXX: this part is slooow// probably better way to do it is to fork local w state and compare to new local
-                        # rebuild wsum
-                        self.topic_wsum = defaultdict(int)
-                        for w,zv in self.topic_w.iteritems():
-                            for z,v in zv.iteritems():
-                                self.topic_wsum[z] += self.topic_w[w][z]
-                                observed_weight += self.topic_w[w][z]
+
+                    # More fine-grained locking
+                    # XXX: this part is slooow// probably better way to do it is to fork local w state and compare to new local
+                    # rebuild wsum
+                    topic_wsum = defaultdict(int)
+                    for w,zv in topic_w.iteritems():
+                        for z,v in zv.iteritems():
+                            topic_wsum[z] += self.topic_w[w][z]
+                            observed_weight += self.topic_w[w][z]
+
+                    with self.topic_lock:
+                        self.topic_wsum = topic_wsum
 
                     self.syncs += 1
         self.complete_syncs += 1
